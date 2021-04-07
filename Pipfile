@@ -1,0 +1,20 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+
+[packages]
+numpy = "*"
+setuptools = "*"
+wheel = "*"
+spacy = "*"
+importlib-metadata = "==2.1.1"
+torch = "*"
+torchvision = "*"
+torchaudio = "*"
+pandas = "*"
+
+[requires]
+python_version = "3.7"
