@@ -11,9 +11,7 @@ setuptools = "*"
 wheel = "*"
 spacy = "*"
 importlib-metadata = "==2.1.1"
-torch = "*"
-torchvision = "*"
-torchaudio = "*"
+torch = "==0.4.1"
 pandas = "*"
 
 [requires]
