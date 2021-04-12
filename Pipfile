@@ -11,8 +11,10 @@ setuptools = "*"
 wheel = "*"
 spacy = "*"
 importlib-metadata = "==2.1.1"
-torch = "==0.4.1"
 pandas = "*"
+tqdm = "*"
+torch = "*"
+torchtext = "*"
 
 [requires]
 python_version = "3.7"
