@@ -20,3 +20,8 @@ for the  code to run the data must be placed at the same directory level as src 
 ```
 
 To set up virtualenv use pipenv
+
+Word vectorization algorithm: https://github.com/stanfordnlp/GloVe
+This algorithm was used to vectorize the training datasets based on vocabulary. 
+
+

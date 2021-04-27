@@ -15,6 +15,9 @@ pandas = "*"
 tqdm = "*"
 torch = "*"
 torchtext = "*"
+sklearn = "*"
+scipy = "*"
+matplotlib = "*"
 
 [requires]
 python_version = "3.7"
