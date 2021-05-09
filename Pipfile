@@ -19,6 +19,7 @@ sklearn = "*"
 scipy = "*"
 matplotlib = "*"
 dill = "*"
+tensorboard = "*"
 
 [requires]
 python_version = "3.7"
