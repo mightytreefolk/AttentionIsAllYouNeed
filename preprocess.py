@@ -41,42 +41,42 @@ def main():
     train_df.to_json('train.json', orient='records', lines=True)
     test_df.to_json('test.json', orient='records', lines=True)
 
-    english = Field(sequential=True,
-                    use_vocab=True,
-                    tokenize=tokenize_eng,
-                    lower=True,
-                    pad_token='<blank>',
-                    init_token='<s>',
-                    eos_token='</s>')
-
-    german = Field(sequential=True,
-                   use_vocab=True,
-                   tokenize=tokenize_ger,
-                   lower=True,
-                   pad_token='<blank>',
-                   init_token='<s>',
-                   eos_token='</s>')
-
-    fields = {'English': ('eng', english), 'German': ('ger', german)}
-    train_data, test_data = TabularDataset.splits(path='',
-                                                  train='train.json',
-                                                  test='test.json',
-                                                  format='json',
-                                                  fields=fields)
-
-    english.build_vocab(train_data, max_size=100000, min_freq=1)
-    print('[Info] Get source language vocabulary size:', len(english.vocab))
-
-    german.build_vocab(train_data, max_size=100000, min_freq=1)
-    print('[Info] Get target language vocabulary size:', len(german.vocab))
-
-    # train_interator, test_iterator = BucketIterator.splits((train_data, test_data), batch_size=32, device='cuda')
-
-    vocab_data = {'vocab': {'src': english, 'trg': german}}
-    training = {'data': {'train': train_data.examples, 'test': test_data.examples}}
-
-    pickle.dump(vocab_data, open('vocab_data.obj', 'wb'))
-    pickle.dump(training, open('training_data.obj', 'wb'))
+    # english = Field(sequential=True,
+    #                 use_vocab=True,
+    #                 tokenize=tokenize_eng,
+    #                 lower=True,
+    #                 pad_token='<blank>',
+    #                 init_token='<s>',
+    #                 eos_token='</s>')
+    #
+    # german = Field(sequential=True,
+    #                use_vocab=True,
+    #                tokenize=tokenize_ger,
+    #                lower=True,
+    #                pad_token='<blank>',
+    #                init_token='<s>',
+    #                eos_token='</s>')
+    #
+    # fields = {'English': ('eng', english), 'German': ('ger', german)}
+    # train_data, test_data = TabularDataset.splits(path='',
+    #                                               train='train.json',
+    #                                               test='test.json',
+    #                                               format='json',
+    #                                               fields=fields)
+    #
+    # english.build_vocab(train_data, max_size=100000, min_freq=1)
+    # print('[Info] Get source language vocabulary size:', len(english.vocab))
+    #
+    # german.build_vocab(train_data, max_size=100000, min_freq=1)
+    # print('[Info] Get target language vocabulary size:', len(german.vocab))
+    #
+    # # train_interator, test_iterator = BucketIterator.splits((train_data, test_data), batch_size=32, device='cuda')
+    #
+    # vocab_data = {'vocab': {'src': english, 'trg': german}}
+    # training = {'data': {'train': train_data.examples, 'test': test_data.examples}}
+    #
+    # pickle.dump(vocab_data, open('vocab_data.obj', 'wb'))
+    # pickle.dump(training, open('training_data.obj', 'wb'))
 
 
 if __name__ == '__main__':
