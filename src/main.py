@@ -89,65 +89,18 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-class MultiGPULossCompute:
-    "A multi-gpu loss compute and train function."
+def loss_function(real, pred):
+    mask = torch.logical_not(torch.eq(real, 0))
 
-    def __init__(self, generator, criterion, devices, opt=None, chunk_size=5):
-        # Send out to different gpus.
-        self.generator = generator
-        self.criterion = nn.parallel.replicate(criterion,
-                                               devices=devices)
-        self.opt = opt
-        self.devices = devices
-        self.chunk_size = chunk_size
+    x = torch.tensor(pred, requires_grad=True).permute((0, 2, 1))
+    #    y=torch.Tensor(real, dtype=torch.float32)
 
-    def __call__(self, out, targets, normalize):
-        total = 0.0
-        generator = nn.parallel.replicate(self.generator,
-                                          devices=self.devices)
-        out_scatter = nn.parallel.scatter(out,
-                                          target_gpus=self.devices)
-        out_grad = [[] for _ in out_scatter]
-        targets = nn.parallel.scatter(targets,
-                                      target_gpus=self.devices)
+    loss_ = torch.nn.CrossEntropyLoss(reduction="none")(x, real)
 
-        # Divide generating into chunks.
-        chunk_size = self.chunk_size
-        for i in range(0, out_scatter[0].size(1), chunk_size):
-            # Predict distributions
-            out_column = [[Variable(o[:, i:i + chunk_size].data,
-                                    requires_grad=self.opt is not None)]
-                          for o in out_scatter]
-            gen = nn.parallel.parallel_apply(generator, out_column)
+    mask = torch.tensor(mask, dtype=loss_.dtype)
+    loss_ = torch.mul(loss_, mask)
 
-            # Compute loss.
-            y = [(g.contiguous().view(-1, g.size(-1)),
-                  t[:, i:i + chunk_size].contiguous().view(-1))
-                 for g, t in zip(gen, targets)]
-            loss = nn.parallel.parallel_apply(self.criterion, y)
-
-            # Sum and normalize loss
-            l = nn.parallel.gather(loss,
-                                   target_device=self.devices[0])
-            l = l.sum()[0] / normalize
-            total += l.data[0]
-
-            # Backprop loss to output of transformer
-            if self.opt is not None:
-                l.backward()
-                for j, l in enumerate(loss):
-                    out_grad[j].append(out_column[j][0].grad.data.clone())
-
-        # Backprop all loss through transformer.
-        if self.opt is not None:
-            out_grad = [Variable(torch.cat(og, dim=1)) for og in out_grad]
-            o1 = out
-            o2 = nn.parallel.gather(out_grad,
-                                    target_device=self.devices[0])
-            o1.backward(gradient=o2)
-            self.opt.step()
-            self.opt.optimizer.zero_grad()
-        return total * normalize
+    return torch.sum(loss_) / torch.sum(mask)
 
 
 def main():
@@ -163,7 +116,7 @@ def main():
     parser.add_argument('-n_layers', type=int, default=6)
     parser.add_argument('-lr_mul', type=float, default=2.0)
     parser.add_argument('-dropout', type=float, default=0.1)
-    parser.add_argument('-output_dir', type=str, default=None)
+    # parser.add_argument('-output_dir', type=str, default=None)
     parser.add_argument('-warmup', '--n_warmup_steps', type=int, default=4000)
 
     opt = parser.parse_args()
@@ -198,6 +151,10 @@ def main():
     print('[Info] Get target language vocabulary size:', len(german.vocab))
 
     batch_size = opt.batch_size
+    train_iterator = BucketIterator(train_data, batch_size=batch_size, device=device, train=True)
+    test_iterator = BucketIterator(test_data, batch_size=batch_size, device=device)
+
+
     # data = pickle.load(open(opt.data_file, 'rb'))
 
     opt.src_pad_idx = english.vocab.stoi['<blank>']
@@ -206,56 +163,21 @@ def main():
     opt.src_vocab_size = len(english.vocab)
     opt.trg_vocab_size = len(german.vocab)
 
-
-
-    devices = [0, 1, 2, 3]
-    pad_idx = opt.trg_vocab_size
-    model = make_model(len(english.vocab), len(german.vocab), N=6)
-    model.cuda()
-    criterion = LabelSmoothing(size=len(german.vocab), padding_idx=pad_idx, smoothing=0.1)
-    criterion.cuda()
-    BATCH_SIZE = 12000
-    train_iter = MyIterator(train_data, batch_size=BATCH_SIZE, device=0,
-                            repeat=False, sort_key=lambda x: (len(x.eng), len(x.ger)),
-                            batch_size_fn=batch_size_fn, train=True)
-    valid_iter = MyIterator(test_data, batch_size=BATCH_SIZE, device=0,
-                            repeat=False, sort_key=lambda x: (len(x.eng), len(x.ger)),
-                            batch_size_fn=batch_size_fn, train=False)
-    model_par = nn.DataParallel(model, device_ids=devices)
-
-    model_opt = NoamOpt(model.src_embed[0].d_model, 1, 2000,
+    criterion = LabelSmoothing(size=opt.trg_vocab_size, padding_idx=0, smoothing=0.0)
+    model = make_model(opt.src_vocab_size, opt.trg_vocab_size, N=6)
+    model_opt = NoamOpt(model.src_embed[0].d_model, 1, 400,
                         torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
-    for epoch in range(10):
-        model_par.train()
-        run_epoch((rebatch(pad_idx, b) for b in train_iter),
-                  model_par,
-                  MultiGPULossCompute(model.generator, criterion,
-                                      devices=devices, opt=model_opt))
-        model_par.eval()
-        loss = run_epoch((rebatch(pad_idx, b) for b in valid_iter),
-                         model_par,
-                         MultiGPULossCompute(model.generator, criterion,
-                                             devices=devices, opt=None))
-        print(loss)
 
-    for i, batch in enumerate(valid_iter):
-        src = batch.src.transpose(0, 1)[:1]
-        src_mask = (src != english.vocab.stoi["<blank>"]).unsqueeze(-2)
-        out = greedy_decode(model, src, src_mask,
-                            max_len=60, start_symbol=german.vocab.stoi["<s>"])
-        print("Translation:", end="\t")
-        for i in range(1, out.size(1)):
-            sym = german.vocab.itos[out[0, i]]
-            if sym == "</s>": break
-            print(sym, end=" ")
-        print()
-        print("Target:", end="\t")
-        for i in range(1, batch.trg.size(0)):
-            sym = german.vocab.itos[batch.trg.data[i, 0]]
-            if sym == "</s>": break
-            print(sym, end=" ")
-        print()
-        break
+    for epoch in range(10):
+        model.train()
+        print(train_iterator)
+        run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator), model, SimpleLossCompute(model.generator, criterion, model_opt))
+        model.eval()
+        print(run_epoch(train_iterator, model, SimpleLossCompute(model.generator, criterion, None)))
+
+
+
+
 
 if __name__ == "__main__":
     main()
