@@ -41,9 +41,6 @@ def main():
     train_df.to_json('train.json', orient='records', lines=True)
     test_df.to_json('test.json', orient='records', lines=True)
 
-    train_df.to_csv('train.csv', index=False)
-    test_df.to_csv('test.csv', index=False)
-
     english = Field(sequential=True,
                     use_vocab=True,
                     tokenize=tokenize_eng,
@@ -75,12 +72,11 @@ def main():
 
     # train_interator, test_iterator = BucketIterator.splits((train_data, test_data), batch_size=32, device='cuda')
 
-    data = {
-        'vocab': {'src': english, 'trg': german},
-        'train': train_data,
-        'test': test_data}
+    vocab_data = {'vocab': {'src': english, 'trg': german}}
+    training = {'data': {'train': train_data.examples, 'test': test_data.examples}}
 
-    pickle.dump(data, open('data.obj', 'wb'))
+    pickle.dump(vocab_data, open('vocab_data.obj', 'wb'))
+    pickle.dump(training, open('training_data.obj', 'wb'))
 
 
 if __name__ == '__main__':

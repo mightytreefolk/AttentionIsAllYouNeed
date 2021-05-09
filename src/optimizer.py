@@ -1,4 +1,3 @@
-import numpy as np
 
 class ScheduledOptim():
     def __init__(self, optimizer, lr_mul, d_model, n_warmup_steps):

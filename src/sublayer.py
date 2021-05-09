@@ -4,8 +4,8 @@ import torch.nn.functional as F
 import math
 from models import multi_layer
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cpu')
 
 def dot_product_attention(query, key, value, mask=None, dropout=None):
     dim_keys = query.size(-1)

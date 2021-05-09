@@ -6,7 +6,7 @@ import os
 
 import pandas as pd
 from tqdm import tqdm
-import dill as pickle
+import pickle
 import copy
 import torch
 import spacy
@@ -174,15 +174,13 @@ def train(model, training_data, validation_data, optimizer, device, opt):
     ''' Start training '''
 
     # Use tensorboard to plot curves, e.g. perplexity, accuracy, learning rate
-    print("[Info] Use Tensorboard")
     from torch.utils.tensorboard import SummaryWriter
     tb_writer = SummaryWriter(log_dir=os.path.join(opt.output_dir, 'tensorboard'))
 
     log_train_file = os.path.join(opt.output_dir, 'train.log')
     log_valid_file = os.path.join(opt.output_dir, 'valid.log')
 
-    print('[Info] Training performance will be written to file: {} and {}'.format(
-        log_train_file, log_valid_file))
+    print('[Info] Training performance will be written to file: {} and {}'.format(log_train_file, log_valid_file))
 
     with open(log_train_file, 'w') as log_tf, open(log_valid_file, 'w') as log_vf:
         log_tf.write('epoch,loss,ppl,accuracy\n')
@@ -197,7 +195,6 @@ def train(model, training_data, validation_data, optimizer, device, opt):
     valid_losses = []
     for epoch_i in range(opt.epoch):
         print('[ Epoch', epoch_i, ']')
-        torch.cuda.empty_cache()
         start = time.time()
         train_loss, train_accu = train_epoch(model, training_data, optimizer, opt, device)
         train_ppl = math.exp(min(train_loss, 100))
@@ -286,7 +283,8 @@ class PositionalEncoding(nn.Module):
 def main():
     torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()
-    # parser.add_argument('data_file', default=None)
+    # parser.add_argument('-vocab_data', default=None)
+    # parser.add_argument('-training_data', default=None)
     parser.add_argument('-epoch', type=int, default=10)
     parser.add_argument('-b', '--batch_size', type=int, default=2048)
     parser.add_argument('-d_model', type=int, default=512)
@@ -309,8 +307,8 @@ def main():
     if not os.path.exists(opt.output_dir):
         os.makedirs(opt.output_dir)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     training_data, validation_data = prepare_dataloaders(opt, device)
 
     print(opt)
