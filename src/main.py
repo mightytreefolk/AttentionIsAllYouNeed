@@ -104,7 +104,8 @@ def loss_function(real, pred):
 
 
 def main():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     parser = argparse.ArgumentParser()
     parser.add_argument('-epoch', type=int, default=10)
     parser.add_argument('-b', '--batch_size', type=int, default=2048)
@@ -164,16 +165,16 @@ def main():
     opt.trg_vocab_size = len(german.vocab)
 
     criterion = LabelSmoothing(size=opt.trg_vocab_size, padding_idx=0, smoothing=0.0)
-    model = make_model(opt.src_vocab_size, opt.trg_vocab_size, N=6)
+    model = make_model(opt.src_vocab_size, opt.trg_vocab_size, N=2)
     model_opt = NoamOpt(model.src_embed[0].d_model, 1, 400,
                         torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
 
     for epoch in range(10):
+        print(f"We are on step {epoch}")
         model.train()
-        print(train_iterator)
         run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator), model, SimpleLossCompute(model.generator, criterion, model_opt))
         model.eval()
-        print(run_epoch(train_iterator, model, SimpleLossCompute(model.generator, criterion, None)))
+        print(run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator), model, SimpleLossCompute(model.generator, criterion, None)))
 
 
 
