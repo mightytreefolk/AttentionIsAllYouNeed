@@ -29,11 +29,11 @@ def main():
     english_test_text = open(en_test, encoding='utf8').read().split('\n')
     german_test_text = open(ger_test, encoding='utf8').read().split('\n')
 
-    raw_train = {'English': [line for line in english_train_text[1:1000]],
-                 'German': [line for line in german_train_text[1:1000]]}
+    raw_train = {'English': [line for line in english_train_text],
+                 'German': [line for line in german_train_text]}
 
-    raw_test = {'English': [line for line in english_test_text[1:1000]],
-                'German': [line for line in german_test_text[1:1000]]}
+    raw_test = {'English': [line for line in english_test_text],
+                'German': [line for line in german_test_text]}
 
     train_df = pd.DataFrame(raw_train, columns=['English', 'German'])
     test_df = pd.DataFrame(raw_test, columns=['English', 'German'])

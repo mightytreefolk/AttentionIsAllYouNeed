@@ -13,7 +13,7 @@ import spacy
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
-from torchtext.legacy.data import Field, BucketIterator, TabularDataset, Dataset
+from torchtext.data import Field, BucketIterator, TabularDataset, Dataset
 from torch.autograd import Variable
 
 # Import internal functions and models
@@ -285,7 +285,7 @@ def main():
     parser = argparse.ArgumentParser()
     # parser.add_argument('-vocab_data', default=None)
     # parser.add_argument('-training_data', default=None)
-    parser.add_argument('-epoch', type=int, default=10)
+    parser.add_argument('-epoch', type=int, default=100)
     parser.add_argument('-b', '--batch_size', type=int, default=2048)
     parser.add_argument('-d_model', type=int, default=512)
     parser.add_argument('-d_inner_hid', type=int, default=2048)
@@ -307,8 +307,7 @@ def main():
     if not os.path.exists(opt.output_dir):
         os.makedirs(opt.output_dir)
 
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     training_data, validation_data = prepare_dataloaders(opt, device)
 
     print(opt)
