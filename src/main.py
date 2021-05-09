@@ -20,8 +20,9 @@ from torch.autograd import Variable
 from encoder import Encoder, EncoderLayer
 from decoder import DecoderLayer, Decoder
 from sublayer import MultiHeadAttention, PositionWiseFeedForward
-from models import EncoderDecoder, Generator, Batch
-from optimizer import ScheduledOptim
+from models import EncoderDecoder, Generator
+from training import Batch, LabelSmoothing, MyIterator, SimpleLossCompute, run_epoch, batch_size_fn, rebatch, greedy_decode
+from optimizer import ScheduledOptim, NoamOpt
 
 
 spacy_de = spacy.load('en_core_web_trf')
@@ -33,198 +34,6 @@ def tokenize_eng(text):
 
 def tokenize_ger(text):
     return [tok.text for tok in spacy_de.tokenizer(text)]
-
-
-def prepare_dataloaders(opt, device):
-    english = Field(sequential=True,
-                    use_vocab=True,
-                    tokenize=tokenize_eng,
-                    lower=True,
-                    pad_token='<blank>',
-                    init_token='<s>',
-                    eos_token='</s>')
-
-    german = Field(sequential=True,
-                   use_vocab=True,
-                   tokenize=tokenize_ger,
-                   lower=True,
-                   pad_token='<blank>',
-                   init_token='<s>',
-                   eos_token='</s>')
-
-    fields = {'English': ('eng', english), 'German': ('ger', german)}
-    train_data, test_data = TabularDataset.splits(path='',
-                                                  train='train.json',
-                                                  test='test.json',
-                                                  format='json',
-                                                  fields=fields)
-
-    english.build_vocab(train_data, max_size=1000, min_freq=1)
-    print('[Info] Get source language vocabulary size:', len(english.vocab))
-
-    german.build_vocab(train_data, max_size=1000, min_freq=1)
-    print('[Info] Get target language vocabulary size:', len(german.vocab))
-
-    batch_size = opt.batch_size
-    # data = pickle.load(open(opt.data_file, 'rb'))
-
-    opt.src_pad_idx = english.vocab.stoi['<blank>']
-    opt.trg_pad_idx = german.vocab.stoi['<blank>']
-
-    opt.src_vocab_size = len(english.vocab)
-    opt.trg_vocab_size = len(german.vocab)
-
-    #========= Preparing Model =========#
-    train_iterator = BucketIterator(train_data, batch_size=batch_size, device=device, train=True)
-    test_iterator = BucketIterator(test_data, batch_size=batch_size, device=device)
-
-    return train_iterator, test_iterator
-
-
-def cal_performance(pred, gold, trg_pad_idx):
-    loss = cal_loss(pred, gold, trg_pad_idx)
-
-    pred = pred.max(1)[1]
-    gold = gold.contiguous().view(-1)
-    non_pad_mask = gold.ne(trg_pad_idx)
-    n_correct = pred.eq(gold).masked_select(non_pad_mask).sum().item()
-    n_word = non_pad_mask.sum().item()
-
-    return loss, n_correct, n_word
-
-
-def cal_loss(pred, gold, trg_pad_idx):
-    ''' Calculate cross entropy loss, apply label smoothing if needed. '''
-
-    gold = gold.contiguous().view(-1)
-    loss = F.cross_entropy(pred, gold, ignore_index=trg_pad_idx, reduction='sum')
-    return loss
-
-def patch_src(src):
-    src = src.transpose(0, 1)
-    return src
-
-
-def patch_trg(trg):
-    trg = trg.transpose(0, 1)
-    trg, gold = trg[:, :-1], trg[:, 1:].contiguous().view(-1)
-    return trg, gold
-
-
-def train_epoch(model, training_data, optimizer, opt, device):
-    model.train()
-    total_loss, n_word_total, n_word_correct = 0, 0, 0
-
-    desc = '  - (Training)   '
-    for batch in tqdm(training_data, mininterval=2, desc=desc, leave=False):
-
-        # prepare data
-        src_seq = patch_src(batch.eng).to(device)
-        trg_seq, gold = map(lambda x: x.to(device), patch_trg(batch.ger))
-
-        # forward
-        data = Batch(src_seq, trg_seq, 0)
-        optimizer.zero_grad()
-        pred = model(data.src, data.trg, data.src_mask, data.trg_mask)
-
-        # backward and update parameters
-        loss, n_correct, n_word = cal_performance(pred, gold, opt.trg_pad_idx)
-        loss.backward()
-        optimizer.step_and_update_lr()
-
-        # note keeping
-        n_word_total += n_word
-        n_word_correct += n_correct
-        total_loss += loss.item()
-
-    loss_per_word = total_loss/n_word_total
-    accuracy = n_word_correct/n_word_total
-    return loss_per_word, accuracy
-
-
-def eval_epoch(model, validation_data, device, opt):
-    ''' Epoch operation in evaluation phase '''
-
-    model.eval()
-    total_loss, n_word_total, n_word_correct = 0, 0, 0
-
-    desc = '  - (Validation) '
-    with torch.no_grad():
-        for batch in tqdm(validation_data, mininterval=2, desc=desc, leave=False):
-
-            # prepare data
-            src_seq = patch_src(batch.src).to(device)
-            trg_seq, gold = map(lambda x: x.to(device), patch_trg(batch.trg))
-            data = yield Batch(src_seq, trg_seq, 0)
-            # forward
-            pred = model(data.src, data.trg, batch.src_mask, batch.trg_mask)
-            loss, n_correct, n_word = cal_performance(pred, gold, opt.trg_pad_idx)
-
-            # note keeping
-            n_word_total += n_word
-            n_word_correct += n_correct
-            total_loss += loss.item()
-
-    loss_per_word = total_loss/n_word_total
-    accuracy = n_word_correct/n_word_total
-    return loss_per_word, accuracy
-
-
-def train(model, training_data, validation_data, optimizer, device, opt):
-    ''' Start training '''
-
-    # Use tensorboard to plot curves, e.g. perplexity, accuracy, learning rate
-    from torch.utils.tensorboard import SummaryWriter
-    tb_writer = SummaryWriter(log_dir=os.path.join(opt.output_dir, 'tensorboard'))
-
-    log_train_file = os.path.join(opt.output_dir, 'train.log')
-    log_valid_file = os.path.join(opt.output_dir, 'valid.log')
-
-    print('[Info] Training performance will be written to file: {} and {}'.format(log_train_file, log_valid_file))
-
-    with open(log_train_file, 'w') as log_tf, open(log_valid_file, 'w') as log_vf:
-        log_tf.write('epoch,loss,ppl,accuracy\n')
-        log_vf.write('epoch,loss,ppl,accuracy\n')
-
-    def print_performances(header, ppl, accu, start_time, lr):
-        print('  - {header:12} ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, lr: {lr:8.5f}, '\
-              'elapse: {elapse:3.3f} min'.format(
-                  header=f"({header})", ppl=ppl,
-                  accu=100*accu, elapse=(time.time()-start_time)/60, lr=lr))
-
-    valid_losses = []
-    for epoch_i in range(opt.epoch):
-        print('[ Epoch', epoch_i, ']')
-        start = time.time()
-        train_loss, train_accu = train_epoch(model, training_data, optimizer, opt, device)
-        train_ppl = math.exp(min(train_loss, 100))
-        # Current learning rate
-        lr = optimizer._optimizer.param_groups[0]['lr']
-        print_performances('Training', train_ppl, train_accu, start, lr)
-
-        start = time.time()
-        valid_loss, valid_accu = eval_epoch(model, validation_data, device, opt)
-        valid_ppl = math.exp(min(valid_loss, 100))
-        print_performances('Validation', valid_ppl, valid_accu, start, lr)
-
-        valid_losses += [valid_loss]
-
-        checkpoint = {'epoch': epoch_i, 'model': model.state_dict()}
-
-        model_name = 'model_accu_{accu:3.3f}.chkpt'.format(accu=100*valid_accu)
-        torch.save(checkpoint, os.path.join(opt.output_dir, model_name))
-
-        with open(log_train_file, 'a') as log_tf, open(log_valid_file, 'a') as log_vf:
-            log_tf.write('{epoch},{loss: 8.5f},{ppl: 8.5f},{accu:3.3f}\n'.format(
-                epoch=epoch_i, loss=train_loss,
-                ppl=train_ppl, accu=100*train_accu))
-            log_vf.write('{epoch},{loss: 8.5f},{ppl: 8.5f},{accu:3.3f}\n'.format(
-                epoch=epoch_i, loss=valid_loss,
-                ppl=valid_ppl, accu=100*valid_accu))
-
-        tb_writer.add_scalars('ppl', {'train': train_ppl, 'val': valid_ppl}, epoch_i)
-        tb_writer.add_scalars('accuracy', {'train': train_accu*100, 'val': valid_accu*100}, epoch_i)
-        tb_writer.add_scalar('learning_rate', lr, epoch_i)
 
 
 def make_model(src_vocab, tgt_vocab, N=6, d_model=512, d_ff=2048, h=8, dropout=0.1):
@@ -280,11 +89,70 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
+class MultiGPULossCompute:
+    "A multi-gpu loss compute and train function."
+
+    def __init__(self, generator, criterion, devices, opt=None, chunk_size=5):
+        # Send out to different gpus.
+        self.generator = generator
+        self.criterion = nn.parallel.replicate(criterion,
+                                               devices=devices)
+        self.opt = opt
+        self.devices = devices
+        self.chunk_size = chunk_size
+
+    def __call__(self, out, targets, normalize):
+        total = 0.0
+        generator = nn.parallel.replicate(self.generator,
+                                          devices=self.devices)
+        out_scatter = nn.parallel.scatter(out,
+                                          target_gpus=self.devices)
+        out_grad = [[] for _ in out_scatter]
+        targets = nn.parallel.scatter(targets,
+                                      target_gpus=self.devices)
+
+        # Divide generating into chunks.
+        chunk_size = self.chunk_size
+        for i in range(0, out_scatter[0].size(1), chunk_size):
+            # Predict distributions
+            out_column = [[Variable(o[:, i:i + chunk_size].data,
+                                    requires_grad=self.opt is not None)]
+                          for o in out_scatter]
+            gen = nn.parallel.parallel_apply(generator, out_column)
+
+            # Compute loss.
+            y = [(g.contiguous().view(-1, g.size(-1)),
+                  t[:, i:i + chunk_size].contiguous().view(-1))
+                 for g, t in zip(gen, targets)]
+            loss = nn.parallel.parallel_apply(self.criterion, y)
+
+            # Sum and normalize loss
+            l = nn.parallel.gather(loss,
+                                   target_device=self.devices[0])
+            l = l.sum()[0] / normalize
+            total += l.data[0]
+
+            # Backprop loss to output of transformer
+            if self.opt is not None:
+                l.backward()
+                for j, l in enumerate(loss):
+                    out_grad[j].append(out_column[j][0].grad.data.clone())
+
+        # Backprop all loss through transformer.
+        if self.opt is not None:
+            out_grad = [Variable(torch.cat(og, dim=1)) for og in out_grad]
+            o1 = out
+            o2 = nn.parallel.gather(out_grad,
+                                    target_device=self.devices[0])
+            o1.backward(gradient=o2)
+            self.opt.step()
+            self.opt.optimizer.zero_grad()
+        return total * normalize
+
+
 def main():
-    torch.cuda.empty_cache()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     parser = argparse.ArgumentParser()
-    # parser.add_argument('-vocab_data', default=None)
-    # parser.add_argument('-training_data', default=None)
     parser.add_argument('-epoch', type=int, default=10)
     parser.add_argument('-b', '--batch_size', type=int, default=2048)
     parser.add_argument('-d_model', type=int, default=512)
@@ -300,32 +168,94 @@ def main():
 
     opt = parser.parse_args()
 
-    if not opt.output_dir:
-        print('No experiment result will be saved.')
-        raise
+    english = Field(sequential=True,
+                    use_vocab=True,
+                    tokenize=tokenize_eng,
+                    lower=True,
+                    pad_token='<blank>',
+                    init_token='<s>',
+                    eos_token='</s>')
 
-    if not os.path.exists(opt.output_dir):
-        os.makedirs(opt.output_dir)
+    german = Field(sequential=True,
+                   use_vocab=True,
+                   tokenize=tokenize_ger,
+                   lower=True,
+                   pad_token='<blank>',
+                   init_token='<s>',
+                   eos_token='</s>')
 
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    device = torch.device('cpu')
-    training_data, validation_data = prepare_dataloaders(opt, device)
+    fields = {'English': ('eng', english), 'German': ('ger', german)}
+    train_data, test_data = TabularDataset.splits(path='',
+                                                  train='train.json',
+                                                  test='test.json',
+                                                  format='json',
+                                                  fields=fields)
 
-    print(opt)
+    english.build_vocab(train_data, max_size=1000, min_freq=1)
+    print('[Info] Get source language vocabulary size:', len(english.vocab))
+
+    german.build_vocab(train_data, max_size=1000, min_freq=1)
+    print('[Info] Get target language vocabulary size:', len(german.vocab))
+
+    batch_size = opt.batch_size
+    # data = pickle.load(open(opt.data_file, 'rb'))
+
+    opt.src_pad_idx = english.vocab.stoi['<blank>']
+    opt.trg_pad_idx = german.vocab.stoi['<blank>']
+
+    opt.src_vocab_size = len(english.vocab)
+    opt.trg_vocab_size = len(german.vocab)
 
 
-    transformer = make_model(src_vocab=opt.src_vocab_size,
-                            tgt_vocab=opt.trg_vocab_size,)
 
-    optimizer = ScheduledOptim(optimizer=optim.Adam(transformer.parameters(),
-                                                    betas=(0.9, 0.98),
-                                                    eps=1e-09),
-                               lr_mul=opt.lr_mul,
-                               d_model=opt.d_model,
-                               n_warmup_steps=opt.n_warmup_steps)
+    devices = [0, 1, 2, 3]
+    pad_idx = opt.trg_vocab_size
+    model = make_model(len(english.vocab), len(german.vocab), N=6)
+    model.cuda()
+    criterion = LabelSmoothing(size=len(german.vocab), padding_idx=pad_idx, smoothing=0.1)
+    criterion.cuda()
+    BATCH_SIZE = 12000
+    train_iter = MyIterator(train_data, batch_size=BATCH_SIZE, device=0,
+                            repeat=False, sort_key=lambda x: (len(x.eng), len(x.ger)),
+                            batch_size_fn=batch_size_fn, train=True)
+    valid_iter = MyIterator(test_data, batch_size=BATCH_SIZE, device=0,
+                            repeat=False, sort_key=lambda x: (len(x.eng), len(x.ger)),
+                            batch_size_fn=batch_size_fn, train=False)
+    model_par = nn.DataParallel(model, device_ids=devices)
 
-    train(transformer, training_data, validation_data, optimizer, device, opt)
+    model_opt = NoamOpt(model.src_embed[0].d_model, 1, 2000,
+                        torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
+    for epoch in range(10):
+        model_par.train()
+        run_epoch((rebatch(pad_idx, b) for b in train_iter),
+                  model_par,
+                  MultiGPULossCompute(model.generator, criterion,
+                                      devices=devices, opt=model_opt))
+        model_par.eval()
+        loss = run_epoch((rebatch(pad_idx, b) for b in valid_iter),
+                         model_par,
+                         MultiGPULossCompute(model.generator, criterion,
+                                             devices=devices, opt=None))
+        print(loss)
 
+    for i, batch in enumerate(valid_iter):
+        src = batch.src.transpose(0, 1)[:1]
+        src_mask = (src != english.vocab.stoi["<blank>"]).unsqueeze(-2)
+        out = greedy_decode(model, src, src_mask,
+                            max_len=60, start_symbol=german.vocab.stoi["<s>"])
+        print("Translation:", end="\t")
+        for i in range(1, out.size(1)):
+            sym = german.vocab.itos[out[0, i]]
+            if sym == "</s>": break
+            print(sym, end=" ")
+        print()
+        print("Target:", end="\t")
+        for i in range(1, batch.trg.size(0)):
+            sym = german.vocab.itos[batch.trg.data[i, 0]]
+            if sym == "</s>": break
+            print(sym, end=" ")
+        print()
+        break
 
 if __name__ == "__main__":
     main()
