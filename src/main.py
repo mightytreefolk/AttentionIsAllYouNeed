@@ -13,7 +13,7 @@ import spacy
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
-from torchtext.data import Field, BucketIterator, TabularDataset, Dataset
+from torchtext.legacy.data import Field, BucketIterator, TabularDataset, Dataset
 from torch.autograd import Variable
 
 # Import internal functions and models
@@ -98,7 +98,7 @@ def cal_loss(pred, gold, trg_pad_idx):
 
     gold = gold.contiguous().view(-1)
     loss = F.cross_entropy(pred, gold, ignore_index=trg_pad_idx, reduction='sum')
-    return loss
+    return loss.detach()
 
 def patch_src(src):
     src = src.transpose(0, 1)
@@ -111,21 +111,54 @@ def patch_trg(trg):
     return trg, gold
 
 
+def run_epoch(data_iter, model, loss_compute):
+    "Standard Training and Logging Function"
+    start = time.time()
+    total_tokens = 0
+    total_loss = 0
+    tokens = 0
+    for i, batch in enumerate(data_iter):
+        out = model.forward(batch.src, batch.trg,
+                            batch.src_mask, batch.trg_mask)
+        loss = loss_compute(out, batch.trg_y, batch.ntokens)
+        total_loss += loss
+        total_tokens += batch.ntokens
+        tokens += batch.ntokens
+        if i % 50 == 1:
+            elapsed = time.time() - start
+            print("Epoch Step: %d Loss: %f Tokens per Sec: %f" %
+                    (i, loss / batch.ntokens, tokens / elapsed))
+            start = time.time()
+            tokens = 0
+    return total_loss / total_tokens
+
+def rebatch(pad_idx, batch):
+    "Fix order in torchtext to match ours"
+    src, trg = batch.eng.transpose(0, 1), batch.ger.transpose(0, 1)
+    return Batch(src, trg, pad_idx)
+
+
+# run_epoch((rebatch(pad_idx, b) for b in train_iter),
+#                   model_par,
+#                   MultiGPULossCompute(model.generator, criterion,
+#                                       devices=devices, opt=model_opt))
+
+
+
+
+
+
 def train_epoch(model, training_data, optimizer, opt, device):
     model.train()
     total_loss, n_word_total, n_word_correct = 0, 0, 0
 
-    desc = '  - (Training)   '
-    for batch in tqdm(training_data, mininterval=2, desc=desc, leave=False):
-
-        # prepare data
-        src_seq = patch_src(batch.eng).to(device)
-        trg_seq, gold = map(lambda x: x.to(device), patch_trg(batch.ger))
-
+    for i, batch in enumerate(training_data):
+        # batch = Batch(src=batch.eng, trg=batch.ger, pad=opt.trg_vocab_size)
+        # # prepare data
+        _, gold = map(lambda x: x.to(device), patch_trg(batch.trg))
         # forward
-        data = Batch(src_seq, trg_seq, 0)
         optimizer.zero_grad()
-        pred = model(data.src, data.trg, data.src_mask, data.trg_mask)
+        pred = model.forward(batch.src, batch.trg, batch.src_mask, batch.trg_mask)
 
         # backward and update parameters
         loss, n_correct, n_word = cal_performance(pred, gold, opt.trg_pad_idx)
@@ -150,14 +183,13 @@ def eval_epoch(model, validation_data, device, opt):
 
     desc = '  - (Validation) '
     with torch.no_grad():
-        for batch in tqdm(validation_data, mininterval=2, desc=desc, leave=False):
+        for i, batch in tqdm(enumerate(validation_data), mininterval=2, desc=desc, leave=False):
 
             # prepare data
-            src_seq = patch_src(batch.src).to(device)
-            trg_seq, gold = map(lambda x: x.to(device), patch_trg(batch.trg))
-            data = yield Batch(src_seq, trg_seq, 0)
+            # batch = Batch(src=batch.eng, trg=batch.ger, pad=opt.trg_vocab_size)
+            _, gold = map(lambda x: x.to(device), patch_trg(batch.trg))
             # forward
-            pred = model(data.src, data.trg, batch.src_mask, batch.trg_mask)
+            pred = model.forward(batch.src, batch.trg, batch.src_mask, batch.trg_mask)
             loss, n_correct, n_word = cal_performance(pred, gold, opt.trg_pad_idx)
 
             # note keeping
@@ -196,14 +228,14 @@ def train(model, training_data, validation_data, optimizer, device, opt):
     for epoch_i in range(opt.epoch):
         print('[ Epoch', epoch_i, ']')
         start = time.time()
-        train_loss, train_accu = train_epoch(model, training_data, optimizer, opt, device)
+        train_loss, train_accu = train_epoch(model, (rebatch(opt.trg_vocab_size, b) for b in training_data), optimizer, opt, device)
         train_ppl = math.exp(min(train_loss, 100))
         # Current learning rate
         lr = optimizer._optimizer.param_groups[0]['lr']
         print_performances('Training', train_ppl, train_accu, start, lr)
 
         start = time.time()
-        valid_loss, valid_accu = eval_epoch(model, validation_data, device, opt)
+        valid_loss, valid_accu = eval_epoch(model, (rebatch(opt.trg_vocab_size, b) for b in validation_data), device, opt)
         valid_ppl = math.exp(min(valid_loss, 100))
         print_performances('Validation', valid_ppl, valid_accu, start, lr)
 
@@ -312,9 +344,8 @@ def main():
 
     print(opt)
 
-
     transformer = make_model(src_vocab=opt.src_vocab_size,
-                            tgt_vocab=opt.trg_vocab_size,)
+                             tgt_vocab=opt.trg_vocab_size,)
 
     optimizer = ScheduledOptim(optimizer=optim.Adam(transformer.parameters(),
                                                     betas=(0.9, 0.98),

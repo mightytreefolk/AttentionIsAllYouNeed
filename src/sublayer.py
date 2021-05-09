@@ -10,7 +10,7 @@ def dot_product_attention(query, key, value, mask=None, dropout=None):
     dim_keys = query.size(-1)
     scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(dim_keys)
     if mask is not None:
-        scores = scores.masked_fill(mask == 0, -1e9)
+        scores = scores.masked_fill(mask == 0, -1e9).to(device)
     p_attn = F.softmax(scores, dim=-1)
     if dropout is not None:
         p_attn = dropout(p_attn)

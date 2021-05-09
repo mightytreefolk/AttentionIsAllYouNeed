@@ -14,7 +14,7 @@ def multi_layer(module, num_copies):
 def subsequent_mask(size):
     attn_shape = (1, size, size)
     subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
-    return torch.from_numpy(subsequent_mask) == 0
+    return torch.from_numpy(subsequent_mask).to(device) == 0
 
 
 class EncoderDecoder(nn.Module):
