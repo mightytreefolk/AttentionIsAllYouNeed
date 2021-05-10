@@ -1,12 +1,6 @@
 # Import external packages
 import math
 import argparse
-import time
-import os
-
-import pandas as pd
-from tqdm import tqdm
-import pickle
 import copy
 import torch
 import spacy
@@ -21,8 +15,8 @@ from encoder import Encoder, EncoderLayer
 from decoder import DecoderLayer, Decoder
 from sublayer import MultiHeadAttention, PositionWiseFeedForward
 from models import EncoderDecoder, Generator
-from training import Batch, LabelSmoothing, MyIterator, SimpleLossCompute, run_epoch, batch_size_fn, rebatch, greedy_decode
-from optimizer import ScheduledOptim, NoamOpt
+from training import LabelSmoothing, SimpleLossCompute, run_epoch, rebatch, greedy_decode
+from optimizer import NoamOpt
 
 
 spacy_de = spacy.load('en_core_web_trf')
@@ -89,26 +83,12 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-def loss_function(real, pred):
-    mask = torch.logical_not(torch.eq(real, 0))
-
-    x = torch.tensor(pred, requires_grad=True).permute((0, 2, 1))
-    #    y=torch.Tensor(real, dtype=torch.float32)
-
-    loss_ = torch.nn.CrossEntropyLoss(reduction="none")(x, real)
-
-    mask = torch.tensor(mask, dtype=loss_.dtype)
-    loss_ = torch.mul(loss_, mask)
-
-    return torch.sum(loss_) / torch.sum(mask)
-
-
 def main():
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cpu')
     parser = argparse.ArgumentParser()
-    parser.add_argument('-epoch', type=int, default=10)
-    parser.add_argument('-b', '--batch_size', type=int, default=2048)
+    parser.add_argument('-epoch', type=int, default=30)
+    parser.add_argument('-b', '--batch_size', type=int, default=50)
     parser.add_argument('-d_model', type=int, default=512)
     parser.add_argument('-d_inner_hid', type=int, default=2048)
     parser.add_argument('-d_k', type=int, default=64)
@@ -165,16 +145,29 @@ def main():
     opt.trg_vocab_size = len(german.vocab)
 
     criterion = LabelSmoothing(size=opt.trg_vocab_size, padding_idx=0, smoothing=0.0)
-    model = make_model(opt.src_vocab_size, opt.trg_vocab_size, N=2)
+    model = make_model(opt.src_vocab_size, opt.trg_vocab_size, N=6)
     model_opt = NoamOpt(model.src_embed[0].d_model, 1, 400,
                         torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
 
-    for epoch in range(10):
-        print(f"We are on step {epoch}")
+    for epoch in range(opt.epoch):
+        print(f"We are on epoch: {epoch}")
         model.train()
         run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator), model, SimpleLossCompute(model.generator, criterion, model_opt))
         model.eval()
-        print(run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator), model, SimpleLossCompute(model.generator, criterion, None)))
+
+        loss = run_epoch((rebatch(opt.trg_pad_idx, b) for b in test_iterator), model,
+                         SimpleLossCompute(model.generator, criterion, model_opt))
+
+        print(loss)
+
+
+
+
+
+
+
+
+
 
 
 
