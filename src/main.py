@@ -23,7 +23,7 @@ from training import LabelSmoothing, run_epoch, rebatch, SimpleLossCompute
 from optimizer import NoamOpt
 from plotting import plot
 from gpu import MultiGPULossCompute
-from transformers import AutoTokenizer
+
 
 spacy_en = spacy.load('en_core_web_trf')
 spacy_de = spacy.load('de_dep_news_trf')
@@ -90,17 +90,21 @@ class PositionalEncoding(nn.Module):
 
 
 def stream_data(train, test, max_vocab_size, opt):
-    tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-    pad_index = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
     english = Field(sequential=True,
-                    use_vocab=False,
-                    tokenize=tokenizer.encode,
-                    pad_token=pad_index)
+                    use_vocab=True,
+                    tokenize=tokenize_eng,
+                    lower=True,
+                    pad_token='<blank>',
+                    init_token='<s>',
+                    eos_token='</s>')
 
     german = Field(sequential=True,
-                   use_vocab=False,
-                   tokenize=tokenizer.encode,
-                   pad_token=pad_index)
+                   use_vocab=True,
+                   tokenize=tokenize_ger,
+                   lower=True,
+                   pad_token='<blank>',
+                   init_token='<s>',
+                   eos_token='</s>')
 
     fields = {'English': ('eng', english), 'German': ('ger', german)}
     train_data, test_data = TabularDataset.splits(path='',
@@ -125,7 +129,6 @@ def stream_data(train, test, max_vocab_size, opt):
 
 
 def load_data(data, opt):
-    tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
     data = pickle.load(open(data, 'rb'))
     opt.src_pad_idx = data['vocab']['src'].vocab.stoi['<blank>']
     opt.trg_pad_idx = data['vocab']['trg'].vocab.stoi['<blank>']
