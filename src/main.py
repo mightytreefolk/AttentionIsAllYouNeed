@@ -22,6 +22,7 @@ from models import EncoderDecoder, Generator
 from training import LabelSmoothing, run_epoch, rebatch, SimpleLossCompute
 from optimizer import NoamOpt
 from plotting import plot
+from gpu import MultiGPULossCompute
 
 
 spacy_en = spacy.load('en_core_web_trf')
@@ -147,12 +148,12 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-epoch', type=int, default=500)
-    parser.add_argument('-b', '--batch_size', type=int, default=30)
-    parser.add_argument('-d_model', type=int, default=64)
-    parser.add_argument('-d_inner_hid', type=int, default=256)
-    parser.add_argument('-n_head', type=int, default=2)
-    parser.add_argument('-n_layers', type=int, default=2)
+    parser.add_argument('-epoch', type=int, default=1000)
+    parser.add_argument('-b', '--batch_size', type=int, default=12000)
+    parser.add_argument('-d_model', type=int, default=512)
+    parser.add_argument('-d_inner_hid', type=int, default=2048)
+    parser.add_argument('-n_head', type=int, default=8)
+    parser.add_argument('-n_layers', type=int, default=6)
     parser.add_argument('-dropout', type=float, default=0.1)
     parser.add_argument('--model_file', default=None)
 
@@ -162,11 +163,9 @@ def main():
     train_data, test_data = load_data('data.obj', opt)
 
     batch_size = opt.batch_size
-    train_iterator = BucketIterator(train_data, batch_size=batch_size, device=device, train=True)
-    test_iterator = BucketIterator(test_data, batch_size=batch_size, device=device)
+    train_iterator = BucketIterator(train_data, batch_size=batch_size, device=device, train=True, repeat=False)
+    test_iterator = BucketIterator(test_data, batch_size=batch_size, device=device, repeat=False)
 
-
-    criterion = LabelSmoothing(size=opt.trg_vocab_size, padding_idx=0, smoothing=0.0)
     model = make_model(src_vocab=opt.src_vocab_size,
                        tgt_vocab=opt.trg_vocab_size,
                        N=opt.n_layers,
@@ -178,54 +177,86 @@ def main():
     if opt.model_file is not None:
         model.load_state_dict(torch.load(opt.model_file))
 
-    model_opt = NoamOpt(model.src_embed[0].d_model, 1, 400,
+    devices = [0, 1, 2, 3]
+
+    pad_idx = opt.trg_pad_idx
+    model.cuda()
+    criterion = LabelSmoothing(size=opt.trg_vocab_size, padding_idx=pad_idx, smoothing=0.1)
+    criterion.cuda()
+    model_par = nn.DataParallel(model, device_ids=devices)
+
+    model_opt = NoamOpt(model.src_embed[0].d_model, 1, 2000,
                         torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
-    accuracies_train = []
-    losses_train = []
-    accuracies_test = []
-    losses_test = []
+
+    accuracies = pd.DataFrame()
+    losses = pd.DataFrame()
+
     for epoch in range(opt.epoch):
-        print(f"We are on epoch: {epoch}")
-        model.train()
-        loss_train, accuracy_train, total_losses_train = run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator),
-                                               model,
-                                               SimpleLossCompute(generator=model.generator,
-                                                                 criterion=criterion,
-                                                                 opt=opt,
-                                                                 optim=model_opt,),
-                                               opt,)
+        model_par.train()
+        run_epoch((rebatch(pad_idx, b) for b in train_iterator),
+                  model_par,
+                  MultiGPULossCompute(generator=model.generator,
+                                      criterion=criterion,
+                                      devices=devices, opt=model_opt))
+        model_par.eval()
+        print("BEGIN VALIDATE EPOCH")
+        loss, accuracy_list, loss_list = run_epoch((rebatch(pad_idx, b) for b in test_iterator),
+                                              model_par,
+                                              MultiGPULossCompute(model.generator, criterion,
+                                                                  devices=devices, opt=None))
+        print(f'Loss from epoch {opt.epoch}: {loss}')
+        accuracies[f'Epoch {opt.epoch}'] = accuracy_list
+        losses[f'Epoch {opt.epoch}'] = loss_list
+        print("END VALIDATE EPOCH")
+    accuracies.to_csv('acc.csv')
+    losses.to_csv('loss.csv')
 
-        model.eval()
-        accuracies_train.append(np.array(accuracy_train))
-        losses_train.append(loss_train)
-        if epoch % 100 == 0:
-            torch.save(model.state_dict(), f'model-{epoch}-{time.time()}.pt')
-            print("BEGIN VALIDATE EPOCH")
-            loss_test, accuracy_test, total_losses_test = run_epoch((rebatch(opt.trg_pad_idx, b) for b in test_iterator), model,
-                                        SimpleLossCompute(generator=model.generator,
-                                                          criterion=criterion,
-                                                          opt=opt,
-                                                          optim=model_opt,
-                                                          backprop=False), opt)
-            accuracies_test.append(np.array(accuracy_test))
-            losses_test.append(loss_test)
-            print("END VALIDATE EPOCH")
+    # accuracies_train = []
+    # losses_train = []
+    # accuracies_test = []
+    # losses_test = []
+    # for epoch in range(opt.epoch):
+    #     print(f"We are on epoch: {epoch}")
+    #     model.train()
+    #     loss_train, accuracy_train, total_losses_train = run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator),
+    #                                            model,
+    #                                            SimpleLossCompute(generator=model.generator,
+    #                                                              criterion=criterion,
+    #                                                              opt=opt,
+    #                                                              optim=model_opt,),
+    #                                            opt,)
+    #
+    #     model.eval()
+    #     accuracies_train.append(np.array(accuracy_train))
+    #     losses_train.append(loss_train)
+    #     if epoch % 100 == 0:
+    #         torch.save(model.state_dict(), f'model-{epoch}-{time.time()}.pt')
+    #         print("BEGIN VALIDATE EPOCH")
+    #         loss_test, accuracy_test, total_losses_test = run_epoch((rebatch(opt.trg_pad_idx, b) for b in test_iterator), model,
+    #                                     SimpleLossCompute(generator=model.generator,
+    #                                                       criterion=criterion,
+    #                                                       opt=opt,
+    #                                                       optim=model_opt,
+    #                                                       backprop=False), opt)
+    #         accuracies_test.append(np.array(accuracy_test))
+    #         losses_test.append(loss_test)
+    #         print("END VALIDATE EPOCH")
 
-    test_acc_df = pd.DataFrame(accuracies_test)
-    test_loss_df = pd.DataFrame(losses_test)
-
-    train_acc_df = pd.DataFrame(accuracies_train)
-    train_loss_df = pd.DataFrame(losses_train)
-
-    test_acc_df.to_csv(f'test_acc-{opt.epoch}.csv')
-    test_loss_df.to_csv(f'test_loss-{opt.epoch}.csv')
-    train_acc_df.to_csv(f'train_acc-{opt.epoch}.csv')
-    train_loss_df.to_csv(f'train_loss-{opt.epoch}.csv')
-    """Plot results"""
-    plot(test_loss_df, 'Loss of test data', 'Epochs', 'Mean Loss', opt)
-    plot(test_acc_df, 'Accuracy of test data', 'Epochs', 'Mean accuracy', opt)
-    plot(train_loss_df, 'Average train loss per epoch', 'Epochs', 'Average Loss', opt)
-    plot(train_acc_df, 'Average train accuracy per epoch', 'Epochs', 'Average Accuracy', opt)
+    # test_acc_df = pd.DataFrame(accuracies_test)
+    # test_loss_df = pd.DataFrame(losses_test)
+    #
+    # train_acc_df = pd.DataFrame(accuracies_train)
+    # train_loss_df = pd.DataFrame(losses_train)
+    #
+    # test_acc_df.to_csv(f'test_acc-{opt.epoch}.csv')
+    # test_loss_df.to_csv(f'test_loss-{opt.epoch}.csv')
+    # train_acc_df.to_csv(f'train_acc-{opt.epoch}.csv')
+    # train_loss_df.to_csv(f'train_loss-{opt.epoch}.csv')
+    # """Plot results"""
+    # plot(test_loss_df, 'Loss of test data', 'Epochs', 'Mean Loss', opt)
+    # plot(test_acc_df, 'Accuracy of test data', 'Epochs', 'Mean accuracy', opt)
+    # plot(train_loss_df, 'Average train loss per epoch', 'Epochs', 'Average Loss', opt)
+    # plot(train_acc_df, 'Average train accuracy per epoch', 'Epochs', 'Average Accuracy', opt)
 
 
 

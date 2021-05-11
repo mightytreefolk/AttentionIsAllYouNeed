@@ -42,7 +42,7 @@ def accuracy_function(real, pred):
     return torch.sum(accuracies) / torch.sum(mask)
 
 
-def run_epoch(data_iter, model, loss_compute, opt):
+def run_epoch(data_iter, model, loss_compute):
     "Standard Training and Logging Function"
     start = time.time()
     total_tokens = 0
@@ -51,25 +51,55 @@ def run_epoch(data_iter, model, loss_compute, opt):
     accuracies = []
     losses = []
     for i, batch in enumerate(data_iter):
-        _, gold = map(lambda x: x.to(device), patch_trg(batch.trg_y))
-        out = model.forward(batch.src, batch.trg, batch.src_mask, batch.trg_mask)
+        out = model.forward(batch.src, batch.trg,
+                            batch.src_mask, batch.trg_mask)
         loss = loss_compute(out, batch.trg_y, batch.ntokens)
+        total_loss += loss
+        total_tokens += batch.ntokens
+        tokens += batch.ntokens
         accuracy = accuracy_function(batch.trg, out)
 
-        total_loss += loss.item()
-        # total_tokens += batch.ntokens
-        tokens += batch.ntokens
         if i % 50 == 1:
             elapsed = time.time() - start
             print("Epoch Step: %d Loss: %f Tokens per Sec: %f" %
-                  (i, loss / batch.ntokens, tokens / elapsed))
+                    (i, loss / batch.ntokens, tokens / elapsed))
             start = time.time()
             tokens = 0
         a = accuracy.cpu()
         accuracies.append(a.numpy())
-        losses.append(total_loss)
+        losses.append(total_loss / total_tokens)
     l = np.array(losses)
-    return total_loss, accuracies, l
+    return total_loss / total_tokens, accuracies, l
+
+
+# def run_epoch(data_iter, model, loss_compute,):
+#     "Standard Training and Logging Function"
+#     start = time.time()
+#     total_tokens = 0
+#     total_loss = 0
+#     tokens = 0
+#     accuracies = []
+#     losses = []
+#     for i, batch in enumerate(data_iter):
+#         _, gold = map(lambda x: x.to(device), patch_trg(batch.trg_y))
+#         out = model.forward(batch.src, batch.trg, batch.src_mask, batch.trg_mask)
+#         loss = loss_compute(out, batch.trg_y, batch.ntokens)
+#         accuracy = accuracy_function(batch.trg, out)
+#
+#         total_loss += loss.item()
+#         # total_tokens += batch.ntokens
+#         tokens += batch.ntokens
+#         if i % 50 == 1:
+#             elapsed = time.time() - start
+#             print("Epoch Step: %d Loss: %f Tokens per Sec: %f" %
+#                   (i, loss / batch.ntokens, tokens / elapsed))
+#             start = time.time()
+#             tokens = 0
+#         a = accuracy.cpu()
+#         accuracies.append(a.numpy())
+#         losses.append(total_loss)
+#     l = np.array(losses)
+#     return total_loss, accuracies, l
 
 
 global max_src_in_batch, max_tgt_in_batch
