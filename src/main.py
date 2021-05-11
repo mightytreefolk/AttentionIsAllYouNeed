@@ -1,6 +1,7 @@
 # Import external packages
 import math
 import argparse
+import dill as pickle
 import copy
 import torch
 import time
@@ -84,12 +85,67 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
+def stream_data(train, test, max_vocab_size, opt):
+    english = Field(sequential=True,
+                    use_vocab=True,
+                    tokenize=tokenize_eng,
+                    lower=True,
+                    pad_token='<blank>',
+                    init_token='<s>',
+                    eos_token='</s>')
+
+    german = Field(sequential=True,
+                   use_vocab=True,
+                   tokenize=tokenize_ger,
+                   lower=False,
+                   pad_token='<blank>',
+                   init_token='<s>',
+                   eos_token='</s>')
+
+    fields = {'English': ('eng', english), 'German': ('ger', german)}
+    train_data, test_data = TabularDataset.splits(path='',
+                                                  train=train,
+                                                  test=test,
+                                                  format='json',
+                                                  fields=fields)
+
+    english.build_vocab(train_data, max_size=max_vocab_size, min_freq=1)
+    print('[Info] Get source language vocabulary size:', len(english.vocab))
+
+    german.build_vocab(train_data, max_size=max_vocab_size, min_freq=1)
+    print('[Info] Get target language vocabulary size:', len(german.vocab))
+
+    opt.src_pad_idx = english.vocab.stoi['<blank>']
+    opt.trg_pad_idx = german.vocab.stoi['<blank>']
+
+    opt.src_vocab_size = len(english.vocab)
+    opt.trg_vocab_size = len(german.vocab)
+
+    return train_data, test_data
+
+
+def load_data(data, opt):
+    data = pickle.load(open(data, 'rb'))
+    opt.src_pad_idx = data['vocab']['src'].vocab.stoi['<blank>']
+    opt.trg_pad_idx = data['vocab']['trg'].vocab.stoi['<blank>']
+
+    opt.src_vocab_size = len(data['vocab']['src'].vocab)
+    print('[Info] Get source language vocabulary size:', opt.src_vocab_size)
+    opt.trg_vocab_size = len(data['vocab']['trg'].vocab)
+    print('[Info] Get target language vocabulary size:', opt.trg_vocab_size)
+    fields = {'eng': data['vocab']['src'], 'ger': data['vocab']['trg']}
+    train = Dataset(examples=data['train'], fields=fields)
+    test = Dataset(examples=data['test'], fields=fields)
+    return train, test
+
+
+
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # device = torch.device('cpu')
     parser = argparse.ArgumentParser()
-    parser.add_argument('-epoch', type=int, default=200)
-    parser.add_argument('-b', '--batch_size', type=int, default=200)
+    parser.add_argument('-epoch', type=int, default=500)
+    parser.add_argument('-b', '--batch_size', type=int, default=50)
     parser.add_argument('-d_model', type=int, default=128)
     parser.add_argument('-d_inner_hid', type=int, default=512)
     parser.add_argument('-d_k', type=int, default=64)
@@ -104,47 +160,13 @@ def main():
 
     opt = parser.parse_args()
 
-    english = Field(sequential=True,
-                    use_vocab=True,
-                    tokenize=tokenize_eng,
-                    lower=True,
-                    pad_token='<blank>',
-                    init_token='<s>',
-                    eos_token='</s>')
-
-    german = Field(sequential=True,
-                   use_vocab=True,
-                   tokenize=tokenize_ger,
-                   lower=True,
-                   pad_token='<blank>',
-                   init_token='<s>',
-                   eos_token='</s>')
-
-    fields = {'English': ('eng', english), 'German': ('ger', german)}
-    train_data, test_data = TabularDataset.splits(path='',
-                                                  train='train.json',
-                                                  test='test.json',
-                                                  format='json',
-                                                  fields=fields)
-
-    english.build_vocab(train_data, max_size=50000, min_freq=1)
-    print('[Info] Get source language vocabulary size:', len(english.vocab))
-
-    german.build_vocab(train_data, max_size=50000, min_freq=1)
-    print('[Info] Get target language vocabulary size:', len(german.vocab))
+    # train_data, test_data = stream_data('train.json', 'test.json', 1000, opt)
+    train_data, test_data = load_data('data.obj', opt)
 
     batch_size = opt.batch_size
     train_iterator = BucketIterator(train_data, batch_size=batch_size, device=device, train=True)
     test_iterator = BucketIterator(test_data, batch_size=batch_size, device=device)
 
-
-    # data = pickle.load(open(opt.data_file, 'rb'))
-
-    opt.src_pad_idx = english.vocab.stoi['<blank>']
-    opt.trg_pad_idx = german.vocab.stoi['<blank>']
-
-    opt.src_vocab_size = len(english.vocab)
-    opt.trg_vocab_size = len(german.vocab)
 
     criterion = LabelSmoothing(size=opt.trg_vocab_size, padding_idx=0, smoothing=0.0)
     model = make_model(src_vocab=opt.src_vocab_size,
@@ -177,7 +199,7 @@ def main():
         model.eval()
         accuracies_train.append(accuracy_train)
         losses_train.append(loss_train)
-        if epoch % 50 == 0:
+        if epoch % 100 == 0:
             torch.save(model.state_dict(), f'model-{epoch}-{time.time()}.pt')
             print("VALIDATE")
             loss_test, accuracy_test = run_epoch((rebatch(opt.trg_pad_idx, b) for b in test_iterator), model,
