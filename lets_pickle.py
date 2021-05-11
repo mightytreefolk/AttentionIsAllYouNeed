@@ -60,37 +60,23 @@ german = Field(sequential=True,
                init_token='<s>',
                eos_token='</s>')
 
-LABEL = LabelField()
-
-
-# train_iter, valid_iter, test_iter = data.BucketIterator.splits(
-#     (train, valid, test), batch_sizes=(16, 256, 256)
-# )
-#
-# # TEXT.build_vocab(train)
-# LABEL.build_vocab(train)
-#
 fields = {'English': ('eng', english),
-          'German': ('ger', german),
-          'gold_label': ('label', LABEL)}
+          'German': ('ger', german)}
 train_data, test_data = TabularDataset.splits(path='',
                                               train='train.json',
                                               test='test.json',
                                               format='json',
                                               fields=fields)
 
-vocab = LABEL.build_vocab(train_data)
-print(vocab)
 
-#
-# data = {'vocab': {'src': english, 'trg': german},
-#         'train': train_data.examples,
-#         'test': test_data.examples}
-#
-# english.build_vocab(train_data, max_size=opt.vocab_size, min_freq=1)
-# print('[Info] Get source language vocabulary size:', len(english.vocab))
-#
-# german.build_vocab(train_data, max_size=opt.vocab_size, min_freq=1)
-# print('[Info] Get target language vocabulary size:', len(german.vocab))
-#
-# pickle.dump(data, open('data.obj', 'wb'))
+data = {'vocab': {'src': english, 'trg': german},
+        'train': train_data.examples,
+        'test': test_data.examples}
+
+english.build_vocab(train_data, max_size=opt.vocab_size, min_freq=1)
+print('[Info] Get source language vocabulary size:', len(english.vocab))
+
+german.build_vocab(train_data, max_size=opt.vocab_size, min_freq=1)
+print('[Info] Get target language vocabulary size:', len(german.vocab))
+
+pickle.dump(data, open('data.obj', 'wb'))
