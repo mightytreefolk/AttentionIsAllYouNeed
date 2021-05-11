@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from performance import patch_trg, cal_performance, patch_src
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class Batch:
     "Object for holding a batch of data with mask during training."
@@ -156,7 +155,7 @@ class SimpleLossCompute:
         loss = F.cross_entropy(x.contiguous().view(-1, x.size(-1)),
                                y.contiguous().view(-1),
                                ignore_index=self.opt.trg_pad_idx,
-                               reduction='sum').to(device)
+                               reduction='sum')
 
 
         # loss = self.criterion(x.contiguous().view(-1, x.size(-1)), y.contiguous().view(-1)) / norm)

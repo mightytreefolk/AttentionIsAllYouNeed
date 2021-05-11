@@ -5,10 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# device = torch.device('cpu')
+
 def multi_layer(module, num_copies):
-    return nn.ModuleList([module for _ in range(num_copies)]).to(device)
+    return nn.ModuleList([module for _ in range(num_copies)]).cude()
 
 
 def subsequent_mask(size):
@@ -20,36 +19,36 @@ def subsequent_mask(size):
 class EncoderDecoder(nn.Module):
     def __init__(self, encoder, decoder, src_embed, tgt_embed, generator):
         super(EncoderDecoder, self).__init__()
-        self.encoder = encoder.to(device)
-        self.decoder = decoder.to(device)
-        self.src_embed = src_embed.to(device)
-        self.tgt_embed = tgt_embed.to(device)
-        self.generator = generator.to(device)
+        self.encoder = encoder
+        self.decoder = decoder
+        self.src_embed = src_embed
+        self.tgt_embed = tgt_embed
+        self.generator = generator
 
     def forward(self, src, tgt, src_mask, tgt_mask):
-        return self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask).to(device)
+        return self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask)
 
     def encode(self, src, src_mask):
-        return self.encoder(self.src_embed(src), src_mask).to(device)
+        return self.encoder(self.src_embed(src), src_mask)
 
     def decode(self, memory, src_mask, tgt, tgt_mask):
-        return self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask).to(device)
+        return self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask)
 
 
 class Generator(nn.Module):
     def __init__(self, d_model, vocab):
         super(Generator, self).__init__()
-        self.proj = nn.Linear(d_model, vocab).to(device)
+        self.proj = nn.Linear(d_model, vocab)
 
     def forward(self, x):
-        return F.log_softmax(self.proj(x), dim=-1).to(device)
+        return F.log_softmax(self.proj(x), dim=-1)
 
 
 class LayerNorm(nn.Module):
     def __init__(self, features, eps=1e-6):
         super(LayerNorm, self).__init__()
-        self.a_2 = nn.Parameter(torch.ones(features)).to(device)
-        self.b_2 = nn.Parameter(torch.zeros(features)).to(device)
+        self.a_2 = nn.Parameter(torch.ones(features))
+        self.b_2 = nn.Parameter(torch.zeros(features))
         self.eps = eps
 
     def forward(self, x):
@@ -62,7 +61,7 @@ class SublayerConnection(nn.Module):
     def __init__(self, size, dropout):
         super(SublayerConnection, self).__init__()
         self.norm = LayerNorm(size)
-        self.dropout = nn.Dropout(dropout).to(device)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, sublayer):
         return x + self.dropout(sublayer(self.norm(x)))

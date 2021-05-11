@@ -4,8 +4,6 @@ import torch.nn.functional as F
 import math
 from models import multi_layer
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# device = torch.device('cpu')
 
 def dot_product_attention(query, key, value, mask=None, dropout=None):
     dim_keys = query.size(-1)
@@ -21,12 +19,12 @@ def dot_product_attention(query, key, value, mask=None, dropout=None):
 class PositionWiseFeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1):
         super(PositionWiseFeedForward, self).__init__()
-        self.w_1 = nn.Linear(d_model, d_ff).to(device)
-        self.w_2 = nn.Linear(d_ff, d_model).to(device)
-        self.dropout = nn.Dropout(dropout).to(device)
+        self.w_1 = nn.Linear(d_model, d_ff)
+        self.w_2 = nn.Linear(d_ff, d_model)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        return self.w_2(self.dropout(F.relu(self.w_1(x)))).to(device)
+        return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
 
 class MultiHeadAttention(nn.Module):

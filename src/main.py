@@ -101,7 +101,7 @@ def stream_data(train, test, max_vocab_size, opt):
     german = Field(sequential=True,
                    use_vocab=True,
                    tokenize=tokenize_ger,
-                   lower=False,
+                   lower=True,
                    pad_token='<blank>',
                    init_token='<s>',
                    eos_token='</s>')
@@ -145,7 +145,6 @@ def load_data(data, opt):
 
 
 def main():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-epoch', type=int, default=1000)
@@ -163,8 +162,8 @@ def main():
     train_data, test_data = load_data('data.obj', opt)
 
     batch_size = opt.batch_size
-    train_iterator = BucketIterator(train_data, batch_size=batch_size, device=device, train=True, repeat=False)
-    test_iterator = BucketIterator(test_data, batch_size=batch_size, device=device, repeat=False)
+    train_iterator = BucketIterator(train_data, batch_size=batch_size, device=0, train=True, repeat=False)
+    test_iterator = BucketIterator(test_data, batch_size=batch_size, device=0, repeat=False)
 
     model = make_model(src_vocab=opt.src_vocab_size,
                        tgt_vocab=opt.trg_vocab_size,
