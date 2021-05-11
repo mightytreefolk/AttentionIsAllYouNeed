@@ -66,7 +66,8 @@ def run_epoch(data_iter, model, loss_compute):
             tokens = 0
         a = accuracy.cpu()
         accuracies.append(a.numpy())
-        losses.append(total_loss / total_tokens)
+        l_ = total_loss / total_tokens
+        losses.append(l_.cpu())
     l = np.array(losses)
     return total_loss / total_tokens, accuracies, l
 

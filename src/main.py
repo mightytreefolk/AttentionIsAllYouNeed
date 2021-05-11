@@ -162,8 +162,8 @@ def main():
     train_data, test_data = load_data('data.obj', opt)
 
     batch_size = opt.batch_size
-    train_iterator = BucketIterator(train_data, batch_size=batch_size, device=0, train=True, repeat=False)
-    test_iterator = BucketIterator(test_data, batch_size=batch_size, device=0, repeat=False)
+    train_iterator = BucketIterator(train_data, batch_size=batch_size, device=torch.device('cuda'), train=True, repeat=False)
+    test_iterator = BucketIterator(test_data, batch_size=batch_size, device=torch.device('cuda'), repeat=False)
 
     model = make_model(src_vocab=opt.src_vocab_size,
                        tgt_vocab=opt.trg_vocab_size,
@@ -176,7 +176,7 @@ def main():
     if opt.model_file is not None:
         model.load_state_dict(torch.load(opt.model_file))
 
-    devices = [0, 1, 2, 3]
+    devices = [0, 1, 2, 3, 4, 5, 6, 7]
 
     pad_idx = opt.trg_pad_idx
     model.cuda()
@@ -207,6 +207,8 @@ def main():
         accuracies[f'Epoch {opt.epoch}'] = accuracy_list
         losses[f'Epoch {opt.epoch}'] = loss_list
         print("END VALIDATE EPOCH")
+        if epoch % 100 == 0:
+            torch.save(model.state_dict(), f'model-{epoch}-{time.time()}.pt')
     accuracies.to_csv('acc.csv')
     losses.to_csv('loss.csv')
 
