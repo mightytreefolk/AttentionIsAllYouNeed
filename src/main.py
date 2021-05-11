@@ -3,14 +3,16 @@ import math
 import argparse
 import dill as pickle
 import copy
+
+import pandas as pd
 import torch
 import time
 import spacy
-import torch.nn.functional as F
+import numpy as np
 import torch.nn as nn
-import torch.optim as optim
 from torchtext.legacy.data import Field, BucketIterator, TabularDataset, Dataset
 from torch.autograd import Variable
+
 
 # Import internal functions and models
 from encoder import Encoder, EncoderLayer
@@ -19,6 +21,7 @@ from sublayer import MultiHeadAttention, PositionWiseFeedForward
 from models import EncoderDecoder, Generator
 from training import LabelSmoothing, run_epoch, rebatch, SimpleLossCompute
 from optimizer import NoamOpt
+from plotting import plot
 
 
 spacy_en = spacy.load('en_core_web_trf')
@@ -142,20 +145,15 @@ def load_data(data, opt):
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # device = torch.device('cpu')
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-epoch', type=int, default=500)
-    parser.add_argument('-b', '--batch_size', type=int, default=50)
-    parser.add_argument('-d_model', type=int, default=128)
-    parser.add_argument('-d_inner_hid', type=int, default=512)
-    parser.add_argument('-d_k', type=int, default=64)
-    parser.add_argument('-d_v', type=int, default=64)
-    parser.add_argument('-n_head', type=int, default=4)
+    parser.add_argument('-b', '--batch_size', type=int, default=30)
+    parser.add_argument('-d_model', type=int, default=64)
+    parser.add_argument('-d_inner_hid', type=int, default=256)
+    parser.add_argument('-n_head', type=int, default=2)
     parser.add_argument('-n_layers', type=int, default=2)
-    parser.add_argument('-lr_mul', type=float, default=2.0)
     parser.add_argument('-dropout', type=float, default=0.1)
-    # parser.add_argument('-output_dir', type=str, default=None)
-    parser.add_argument('-warmup', '--n_warmup_steps', type=int, default=4000)
     parser.add_argument('--model_file', default=None)
 
     opt = parser.parse_args()
@@ -174,7 +172,8 @@ def main():
                        N=opt.n_layers,
                        d_model=opt.d_model,
                        d_ff=opt.d_inner_hid,
-                       h=opt.n_head)
+                       h=opt.n_head,
+                       dropout=opt.dropout)
 
     if opt.model_file is not None:
         model.load_state_dict(torch.load(opt.model_file))
@@ -188,7 +187,7 @@ def main():
     for epoch in range(opt.epoch):
         print(f"We are on epoch: {epoch}")
         model.train()
-        loss_train, accuracy_train = run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator),
+        loss_train, accuracy_train, total_losses_train = run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator),
                                                model,
                                                SimpleLossCompute(generator=model.generator,
                                                                  criterion=criterion,
@@ -197,21 +196,36 @@ def main():
                                                opt,)
 
         model.eval()
-        accuracies_train.append(accuracy_train)
+        accuracies_train.append(np.array(accuracy_train))
         losses_train.append(loss_train)
         if epoch % 100 == 0:
             torch.save(model.state_dict(), f'model-{epoch}-{time.time()}.pt')
-            print("VALIDATE")
-            loss_test, accuracy_test = run_epoch((rebatch(opt.trg_pad_idx, b) for b in test_iterator), model,
+            print("BEGIN VALIDATE EPOCH")
+            loss_test, accuracy_test, total_losses_test = run_epoch((rebatch(opt.trg_pad_idx, b) for b in test_iterator), model,
                                         SimpleLossCompute(generator=model.generator,
                                                           criterion=criterion,
                                                           opt=opt,
                                                           optim=model_opt,
                                                           backprop=False), opt)
-            accuracies_test.append(accuracy_test)
+            accuracies_test.append(np.array(accuracy_test))
             losses_test.append(loss_test)
+            print("END VALIDATE EPOCH")
 
+    test_acc_df = pd.DataFrame(accuracies_test)
+    test_loss_df = pd.DataFrame(losses_test)
 
+    train_acc_df = pd.DataFrame(accuracies_train)
+    train_loss_df = pd.DataFrame(losses_train)
+
+    test_acc_df.to_csv(f'test_acc-{opt.epoch}.csv')
+    test_loss_df.to_csv(f'test_loss-{opt.epoch}.csv')
+    train_acc_df.to_csv(f'train_acc-{opt.epoch}.csv')
+    train_loss_df.to_csv(f'train_loss-{opt.epoch}.csv')
+    """Plot results"""
+    plot(test_loss_df, 'Loss of test data', 'Epochs', 'Mean Loss', opt)
+    plot(test_acc_df, 'Accuracy of test data', 'Epochs', 'Mean accuracy', opt)
+    plot(train_loss_df, 'Average train loss per epoch', 'Epochs', 'Average Loss', opt)
+    plot(train_acc_df, 'Average train accuracy per epoch', 'Epochs', 'Average Accuracy', opt)
 
 
 

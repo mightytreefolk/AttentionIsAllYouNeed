@@ -1,12 +1,17 @@
 import os
 import dill as pickle
 import pandas as pd
-from torchtext.legacy.data import Field, BucketIterator, TabularDataset
+from torchtext.legacy.data import Field, TabularDataset
 import spacy
+import argparse
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--lines', '-l', type=int, default=30000)
+parser.add_argument('--vocab_size', '-vs', type=int, default=None)
+opt = parser.parse_args()
 
-spacy_de = spacy.load('en_core_web_trf')
-spacy_en = spacy.load('de_dep_news_trf')
+spacy_en = spacy.load('en_core_web_trf')
+spacy_de = spacy.load('de_dep_news_trf')
 
 def tokenize_eng(text):
     return [tok.text for tok in spacy_en.tokenizer(text)]
@@ -27,8 +32,8 @@ german_train_text = open(ger_train, encoding='utf8').read().split('\n')
 english_test_text = open(en_test, encoding='utf8').read().split('\n')
 german_test_text = open(ger_test, encoding='utf8').read().split('\n')
 
-raw_train = {'English': [line for line in english_train_text[1:100000]],
-                 'German': [line for line in german_train_text[1:100000]]}
+raw_train = {'English': [line for line in english_train_text[1:opt.lines]],
+                 'German': [line for line in german_train_text[1:opt.lines]]}
 
 raw_test = {'English': [line for line in english_test_text[1:1000]],
                 'German': [line for line in german_test_text[1:1000]]}
@@ -67,10 +72,10 @@ data = {'vocab': {'src': english, 'trg': german},
         'train': train_data.examples,
         'test': test_data.examples}
 
-english.build_vocab(train_data, min_freq=1)
+english.build_vocab(train_data, max_size=opt.vocab_size, min_freq=1)
 print('[Info] Get source language vocabulary size:', len(english.vocab))
 
-german.build_vocab(train_data, min_freq=1)
+german.build_vocab(train_data, max_size=opt.vocab_size, min_freq=1)
 print('[Info] Get target language vocabulary size:', len(german.vocab))
 
 pickle.dump(data, open('data.obj', 'wb'))

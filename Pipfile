@@ -20,6 +20,7 @@ scipy = "*"
 matplotlib = "*"
 dill = "*"
 tensorboard = "*"
+plotly = "*"
 
 [requires]
 python_version = "3.7"

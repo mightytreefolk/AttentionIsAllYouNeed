@@ -5,8 +5,8 @@ import os
 import pandas as pd
 from torchtext.legacy.data import Field, BucketIterator, TabularDataset
 
-spacy_de = spacy.load('en_core_web_trf')
-spacy_en = spacy.load('de_dep_news_trf')
+spacy_en = spacy.load('en_core_web_trf')
+spacy_de = spacy.load('de_dep_news_trf')
 
 def tokenize_eng(text):
     return [tok.text for tok in spacy_en.tokenizer(text)]

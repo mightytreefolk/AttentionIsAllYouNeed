@@ -1,12 +1,10 @@
 import time
 from models import subsequent_mask
-import copy
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from torchtext.legacy import data
 from performance import patch_trg, cal_performance, patch_src
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -50,6 +48,8 @@ def run_epoch(data_iter, model, loss_compute, opt):
     total_tokens = 0
     total_loss = 0
     tokens = 0
+    accuracies = []
+    losses = []
     for i, batch in enumerate(data_iter):
         _, gold = map(lambda x: x.to(device), patch_trg(batch.trg_y))
         out = model.forward(batch.src, batch.trg, batch.src_mask, batch.trg_mask)
@@ -65,7 +65,11 @@ def run_epoch(data_iter, model, loss_compute, opt):
                   (i, loss / batch.ntokens, tokens / elapsed))
             start = time.time()
             tokens = 0
-    return total_loss, accuracy
+        a = accuracy.cpu()
+        accuracies.append(a.numpy())
+        losses.append(total_loss)
+    l = np.array(losses)
+    return total_loss, accuracies, l
 
 
 global max_src_in_batch, max_tgt_in_batch
@@ -157,3 +161,38 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
         ys = torch.cat([ys,
                         torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
     return ys
+
+
+# def evaluate2(sentence, max_length=40):
+#     # inp sentence is portuguese, hence adding the start and end token
+#
+#     encoder_input = torch.LongTensor([[EN_TEXT.vocab.stoi[w] for w in tokenize_en(sentence)]])
+#     print(encoder_input)
+#     output = torch.LongTensor([DE_TEXT.vocab.stoi['<sos>']]);
+#     output = torch.unsqueeze(output, 0);
+#     print(output)
+#
+#     end = torch.LongTensor([DE_TEXT.vocab.stoi['<eos>']]);
+#
+#     for i in range(max_length):
+#         #        enc_padding_mask, combined_mask, dec_padding_mask = create_masks(encoder_input, output)
+#         predictions, attention_weights = transformer.call(encoder_input,
+#                                                           output,
+#                                                           False,
+#                                                           None,
+#                                                           None,
+#                                                           None)
+#         # select the last word from the seq_len dimension
+#         predictions = predictions[:, -1:, :]  # (batch_size, 1, vocab_size)
+#         predicted_id = torch.argmax(predictions, axis=-1)
+#         output = torch.cat([output, predicted_id], axis=-1)
+#         if predicted_id == end:
+#             break
+#     text = [DE_TEXT.vocab.itos[w] for w in output[0]]  # shape: ()
+#     tokens = output[0]
+#
+#     return text, tokens, attention_weights
+#
+#
+# text, tokens, attention_weights = evaluate2('The restaurant has both outdoor and indoor seating options .')
+# print(' '.join(text[1:-1]))
