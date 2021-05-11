@@ -5,20 +5,13 @@ from torchtext.legacy.data import Field, TabularDataset
 import spacy
 import argparse
 
+from transformers import AutoTokenizer
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--lines', '-l', type=int, default=30000)
 parser.add_argument('--vocab_size', '-vs', type=int, default=None)
 opt = parser.parse_args()
 
-spacy_en = spacy.load('en_core_web_trf')
-spacy_de = spacy.load('de_dep_news_trf')
-
-def tokenize_eng(text):
-    return [tok.text for tok in spacy_en.tokenizer(text)]
-
-
-def tokenize_ger(text):
-    return [tok.text for tok in spacy_de.tokenizer(text)]
 
 en_train = os.path.join('data', 'train_data', 'train.en')
 ger_train = os.path.join('data', 'train_data', 'train.de')
@@ -35,8 +28,8 @@ german_test_text = open(ger_test, encoding='utf8').read().split('\n')
 raw_train = {'English': [line for line in english_train_text[1:opt.lines]],
                  'German': [line for line in german_train_text[1:opt.lines]]}
 
-raw_test = {'English': [line for line in english_test_text[1:1000]],
-                'German': [line for line in german_test_text[1:1000]]}
+raw_test = {'English': [line for line in english_test_text],
+                'German': [line for line in german_test_text]}
 
 train_df = pd.DataFrame(raw_train, columns=['English', 'German'])
 test_df = pd.DataFrame(raw_test, columns=['English', 'German'])
@@ -44,21 +37,18 @@ test_df = pd.DataFrame(raw_test, columns=['English', 'German'])
 train_df.to_json('train.json', orient='records', lines=True)
 test_df.to_json('test.json', orient='records', lines=True)
 
+tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+pad_index = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
+
 english = Field(sequential=True,
-                use_vocab=True,
-                tokenize=tokenize_eng,
-                lower=True,
-                pad_token='<blank>',
-                init_token='<s>',
-                eos_token='</s>')
+                use_vocab=False,
+                tokenize=tokenizer.encode,
+                pad_token=pad_index)
 
 german = Field(sequential=True,
-               use_vocab=True,
-               tokenize=tokenize_ger,
-               lower=True,
-               pad_token='<blank>',
-               init_token='<s>',
-               eos_token='</s>')
+               use_vocab=False,
+               tokenize=tokenizer.encode,
+               pad_token=pad_index)
 
 fields = {'English': ('eng', english), 'German': ('ger', german)}
 train_data, test_data = TabularDataset.splits(path='',

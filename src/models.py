@@ -7,7 +7,7 @@ from torch.autograd import Variable
 
 
 def multi_layer(module, num_copies):
-    return nn.ModuleList([module for _ in range(num_copies)]).cude()
+    return nn.ModuleList([module for _ in range(num_copies)])
 
 
 def subsequent_mask(size):
