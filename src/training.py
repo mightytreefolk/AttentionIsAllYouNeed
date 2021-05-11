@@ -7,6 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torchtext.legacy import data
+from performance import patch_trg, cal_performance, patch_src
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class Batch:
     "Object for holding a batch of data with mask during training."
@@ -29,17 +32,32 @@ class Batch:
         return tgt_mask
 
 
-def run_epoch(data_iter, model, loss_compute):
+def accuracy_function(real, pred):
+    accuracies = torch.eq(real, torch.argmax(pred, axis=2))
+
+    mask = torch.logical_not(torch.eq(real, 0))
+    accuracies = torch.logical_and(mask, accuracies)
+
+    accuracies = torch.tensor(accuracies, dtype=torch.float32)
+    mask = torch.tensor(mask.clone().detach(), dtype=torch.float32)
+
+    return torch.sum(accuracies) / torch.sum(mask)
+
+
+def run_epoch(data_iter, model, loss_compute, opt):
     "Standard Training and Logging Function"
     start = time.time()
     total_tokens = 0
     total_loss = 0
     tokens = 0
     for i, batch in enumerate(data_iter):
+        _, gold = map(lambda x: x.to(device), patch_trg(batch.trg_y))
         out = model.forward(batch.src, batch.trg, batch.src_mask, batch.trg_mask)
         loss = loss_compute(out, batch.trg_y, batch.ntokens)
-        total_loss += loss
-        total_tokens += batch.ntokens
+        accuracy = accuracy_function(batch.trg, out)
+
+        total_loss += loss.item()
+        # total_tokens += batch.ntokens
         tokens += batch.ntokens
         if i % 50 == 1:
             elapsed = time.time() - start
@@ -47,7 +65,7 @@ def run_epoch(data_iter, model, loss_compute):
                   (i, loss / batch.ntokens, tokens / elapsed))
             start = time.time()
             tokens = 0
-    return total_loss / total_tokens
+    return total_loss, accuracy
 
 
 global max_src_in_batch, max_tgt_in_batch
@@ -92,18 +110,29 @@ class LabelSmoothing(nn.Module):
 class SimpleLossCompute:
     "A simple loss compute and train function."
 
-    def __init__(self, generator, criterion, opt=None):
+    def __init__(self, generator, criterion, opt, optim=None, backprop=True):
         self.generator = generator
         self.criterion = criterion
+        self.optim = optim
         self.opt = opt
+        self.backprop = backprop
 
     def __call__(self, x, y, norm):
         x = self.generator(x)
-        loss = self.criterion(x.contiguous().view(-1, x.size(-1)), y.contiguous().view(-1)) / norm
-        loss.backward()
-        if self.opt is not None:
-            self.opt.step()
-            self.opt.optimizer.zero_grad()
+        loss = F.cross_entropy(x.contiguous().view(-1, x.size(-1)),
+                               y.contiguous().view(-1),
+                               ignore_index=self.opt.trg_pad_idx,
+                               reduction='sum').to(device)
+
+
+        # loss = self.criterion(x.contiguous().view(-1, x.size(-1)), y.contiguous().view(-1)) / norm)
+
+        if self.backprop:
+            loss.backward()
+
+        if self.optim is not None:
+            self.optim.step()
+            self.optim.optimizer.zero_grad()
         return loss.data * norm
 
 

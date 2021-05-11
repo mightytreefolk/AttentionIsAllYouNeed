@@ -3,6 +3,7 @@ import math
 import argparse
 import copy
 import torch
+import time
 import spacy
 import torch.nn.functional as F
 import torch.nn as nn
@@ -15,12 +16,12 @@ from encoder import Encoder, EncoderLayer
 from decoder import DecoderLayer, Decoder
 from sublayer import MultiHeadAttention, PositionWiseFeedForward
 from models import EncoderDecoder, Generator
-from training import LabelSmoothing, SimpleLossCompute, run_epoch, rebatch, greedy_decode
+from training import LabelSmoothing, run_epoch, rebatch, SimpleLossCompute
 from optimizer import NoamOpt
 
 
-spacy_de = spacy.load('en_core_web_trf')
-spacy_en = spacy.load('de_dep_news_trf')
+spacy_en = spacy.load('en_core_web_trf')
+spacy_de = spacy.load('de_dep_news_trf')
 
 def tokenize_eng(text):
     return [tok.text for tok in spacy_en.tokenizer(text)]
@@ -30,7 +31,7 @@ def tokenize_ger(text):
     return [tok.text for tok in spacy_de.tokenizer(text)]
 
 
-def make_model(src_vocab, tgt_vocab, N=6, d_model=512, d_ff=2048, h=8, dropout=0.1):
+def make_model(src_vocab, tgt_vocab, N=6, d_model=512, d_ff=512, h=8, dropout=0.1):
     "Helper: Construct a model from hyperparameters."
     c = copy.deepcopy
     attn = MultiHeadAttention(h, d_model)
@@ -87,18 +88,19 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # device = torch.device('cpu')
     parser = argparse.ArgumentParser()
-    parser.add_argument('-epoch', type=int, default=30)
-    parser.add_argument('-b', '--batch_size', type=int, default=50)
-    parser.add_argument('-d_model', type=int, default=512)
-    parser.add_argument('-d_inner_hid', type=int, default=2048)
+    parser.add_argument('-epoch', type=int, default=200)
+    parser.add_argument('-b', '--batch_size', type=int, default=200)
+    parser.add_argument('-d_model', type=int, default=128)
+    parser.add_argument('-d_inner_hid', type=int, default=512)
     parser.add_argument('-d_k', type=int, default=64)
     parser.add_argument('-d_v', type=int, default=64)
-    parser.add_argument('-n_head', type=int, default=8)
-    parser.add_argument('-n_layers', type=int, default=6)
+    parser.add_argument('-n_head', type=int, default=4)
+    parser.add_argument('-n_layers', type=int, default=2)
     parser.add_argument('-lr_mul', type=float, default=2.0)
     parser.add_argument('-dropout', type=float, default=0.1)
     # parser.add_argument('-output_dir', type=str, default=None)
     parser.add_argument('-warmup', '--n_warmup_steps', type=int, default=4000)
+    parser.add_argument('--model_file', default=None)
 
     opt = parser.parse_args()
 
@@ -125,10 +127,10 @@ def main():
                                                   format='json',
                                                   fields=fields)
 
-    english.build_vocab(train_data, max_size=1000, min_freq=1)
+    english.build_vocab(train_data, max_size=50000, min_freq=1)
     print('[Info] Get source language vocabulary size:', len(english.vocab))
 
-    german.build_vocab(train_data, max_size=1000, min_freq=1)
+    german.build_vocab(train_data, max_size=50000, min_freq=1)
     print('[Info] Get target language vocabulary size:', len(german.vocab))
 
     batch_size = opt.batch_size
@@ -145,29 +147,47 @@ def main():
     opt.trg_vocab_size = len(german.vocab)
 
     criterion = LabelSmoothing(size=opt.trg_vocab_size, padding_idx=0, smoothing=0.0)
-    model = make_model(opt.src_vocab_size, opt.trg_vocab_size, N=6)
+    model = make_model(src_vocab=opt.src_vocab_size,
+                       tgt_vocab=opt.trg_vocab_size,
+                       N=opt.n_layers,
+                       d_model=opt.d_model,
+                       d_ff=opt.d_inner_hid,
+                       h=opt.n_head)
+
+    if opt.model_file is not None:
+        model.load_state_dict(torch.load(opt.model_file))
+
     model_opt = NoamOpt(model.src_embed[0].d_model, 1, 400,
                         torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
-
+    accuracies_train = []
+    losses_train = []
+    accuracies_test = []
+    losses_test = []
     for epoch in range(opt.epoch):
         print(f"We are on epoch: {epoch}")
         model.train()
-        run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator), model, SimpleLossCompute(model.generator, criterion, model_opt))
+        loss_train, accuracy_train = run_epoch((rebatch(opt.trg_pad_idx, b) for b in train_iterator),
+                                               model,
+                                               SimpleLossCompute(generator=model.generator,
+                                                                 criterion=criterion,
+                                                                 opt=opt,
+                                                                 optim=model_opt,),
+                                               opt,)
+
         model.eval()
-
-        loss = run_epoch((rebatch(opt.trg_pad_idx, b) for b in test_iterator), model,
-                         SimpleLossCompute(model.generator, criterion, model_opt))
-
-        print(loss)
-
-
-
-
-
-
-
-
-
+        accuracies_train.append(accuracy_train)
+        losses_train.append(loss_train)
+        if epoch % 50 == 0:
+            torch.save(model.state_dict(), f'model-{epoch}-{time.time()}.pt')
+            print("VALIDATE")
+            loss_test, accuracy_test = run_epoch((rebatch(opt.trg_pad_idx, b) for b in test_iterator), model,
+                                        SimpleLossCompute(generator=model.generator,
+                                                          criterion=criterion,
+                                                          opt=opt,
+                                                          optim=model_opt,
+                                                          backprop=False), opt)
+            accuracies_test.append(accuracy_test)
+            losses_test.append(loss_test)
 
 
 

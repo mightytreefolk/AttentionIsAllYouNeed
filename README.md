@@ -23,5 +23,5 @@ To set up virtualenv use pipenv
 
 Word vectorization algorithm: https://github.com/stanfordnlp/GloVe
 This algorithm was used to vectorize the training datasets based on vocabulary. 
-
+https://gist.github.com/michaelchughes/85287f1c6f6440c060c3d86b4e7d764b
 
