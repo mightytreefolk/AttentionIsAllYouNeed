@@ -191,6 +191,7 @@ def main():
     losses = pd.DataFrame()
 
     for epoch in range(opt.epoch):
+        print(f'Beginning Training Epoch: {epoch}')
         model_par.train()
         run_epoch((rebatch(pad_idx, b) for b in train_iterator),
                   model_par,
@@ -203,9 +204,9 @@ def main():
                                               model_par,
                                               MultiGPULossCompute(model.generator, criterion,
                                                                   devices=devices, opt=None))
-        print(f'Loss from epoch {opt.epoch}: {loss}')
-        accuracies[f'Epoch {opt.epoch}'] = accuracy_list
-        losses[f'Epoch {opt.epoch}'] = loss_list
+        print(f'Loss from epoch {epoch}: {loss}')
+        accuracies[f'Epoch {epoch}'] = accuracy_list
+        losses[f'Epoch {epoch}'] = loss_list
         print("END VALIDATE EPOCH")
         if epoch % 100 == 0:
             torch.save(model.state_dict(), f'model-{epoch}-{time.time()}.pt')

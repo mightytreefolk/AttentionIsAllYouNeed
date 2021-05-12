@@ -53,7 +53,7 @@ def run_epoch(data_iter, model, loss_compute):
         out = model.forward(batch.src, batch.trg,
                             batch.src_mask, batch.trg_mask)
         loss = loss_compute(out, batch.trg_y, batch.ntokens)
-        total_loss += loss
+        total_loss += loss.detach()
         total_tokens += batch.ntokens
         tokens += batch.ntokens
         accuracy = accuracy_function(batch.trg, out)
