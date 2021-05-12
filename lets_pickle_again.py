@@ -2,7 +2,6 @@ import os
 import dill as pickle
 import pandas as pd
 from torchtext.legacy.data import Field, TabularDataset, LabelField
-import spacy
 import argparse
 from transformers import BertTokenizer, BertModel, BertForMaskedLM
 
@@ -10,16 +9,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--lines', '-l', type=int, default=30000)
 parser.add_argument('--vocab_size', '-vs', type=int, default=None)
 opt = parser.parse_args()
-
-spacy_en = spacy.load('en_core_web_trf')
-spacy_de = spacy.load('de_dep_news_trf')
-
-def tokenize_eng(text):
-    return [tok.text for tok in spacy_en.tokenizer(text)]
-
-
-def tokenize_ger(text):
-    return [tok.text for tok in spacy_de.tokenizer(text)]
 
 en_train = os.path.join('data', 'train_data', 'train.en')
 ger_train = os.path.join('data', 'train_data', 'train.de')
@@ -66,7 +55,6 @@ train_data, test_data = TabularDataset.splits(path='',
                                               test='test.json',
                                               format='json',
                                               fields=fields)
-
 
 data = {'vocab': {'src': english, 'trg': german},
         'train': train_data.examples,

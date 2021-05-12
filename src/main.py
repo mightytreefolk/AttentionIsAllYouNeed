@@ -212,7 +212,7 @@ def main():
         train_loss[f'Epoch {epoch}'] = train_loss_list
         train_accuracies[f'Epoch {epoch}'] = train_accuracy_list
         print("END VALIDATE EPOCH")
-        if epoch % 100 == 0:
+        if epoch % 10 == 0:
             torch.save(model.state_dict(), f'model-{epoch}-{time.time()}.pt')
     accuracies.to_csv('test_acc.csv')
     losses.to_csv('test_loss.csv')
