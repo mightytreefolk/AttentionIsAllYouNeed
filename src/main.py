@@ -189,15 +189,17 @@ def main():
 
     accuracies = pd.DataFrame()
     losses = pd.DataFrame()
+    train_loss = pd.DataFrame()
+    train_accuracies = pd.DataFrame()
 
     for epoch in range(opt.epoch):
         print(f'Beginning Training Epoch: {epoch}')
         model_par.train()
-        run_epoch((rebatch(pad_idx, b) for b in train_iterator),
-                  model_par,
-                  MultiGPULossCompute(generator=model.generator,
-                                      criterion=criterion,
-                                      devices=devices, opt=model_opt))
+        _, train_accuracy_list, train_loss_list = run_epoch((rebatch(pad_idx, b) for b in train_iterator),
+                                                   model_par,
+                                                   MultiGPULossCompute(generator=model.generator,
+                                                                       criterion=criterion,
+                                                                       devices=devices, opt=model_opt))
         model_par.eval()
         print("BEGIN VALIDATE EPOCH")
         loss, accuracy_list, loss_list = run_epoch((rebatch(pad_idx, b) for b in test_iterator),
@@ -207,12 +209,15 @@ def main():
         print(f'Loss from epoch {epoch}: {loss}')
         accuracies[f'Epoch {epoch}'] = accuracy_list
         losses[f'Epoch {epoch}'] = loss_list
+        train_loss[f'Epoch {epoch}'] = train_loss_list
+        train_accuracies[f'Epoch {epoch}'] = train_accuracy_list
         print("END VALIDATE EPOCH")
         if epoch % 100 == 0:
             torch.save(model.state_dict(), f'model-{epoch}-{time.time()}.pt')
-    accuracies.to_csv('acc.csv')
-    losses.to_csv('loss.csv')
-
+    accuracies.to_csv('test_acc.csv')
+    losses.to_csv('test_loss.csv')
+    train_loss.to_csv('train_loss.csv')
+    train_accuracies.to_csv('train_acc.csv')
     # accuracies_train = []
     # losses_train = []
     # accuracies_test = []
