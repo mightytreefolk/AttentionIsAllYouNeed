@@ -119,8 +119,8 @@ def main():
 
     valid_iter = BucketIterator(valid_data, batch_size=10, repeat=False)
 
-    model = make_model(src_vocab=9797,
-                       tgt_vocab=18669,
+    model = make_model(src_vocab=27929,
+                       tgt_vocab=24746,
                        N=opt.n_layers,
                        d_model=opt.d_model,
                        d_ff=opt.d_inner_hid,

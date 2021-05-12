@@ -206,6 +206,8 @@ def main():
                                               model_par,
                                               MultiGPULossCompute(model.generator, criterion,
                                                                   devices=devices, opt=None))
+        print(f'Accuracy of training: {np.array(train_accuracy_list).mean()}')
+        print(f'Accuracy of validation {np.array(accuracy_list).mean()}')
         print(f'Loss from epoch {epoch}: {loss}')
         accuracies[f'Epoch {epoch}'] = accuracy_list
         losses[f'Epoch {epoch}'] = loss_list

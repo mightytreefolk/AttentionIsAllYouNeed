@@ -41,12 +41,16 @@ pad_index = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
 english = Field(sequential=True,
                 use_vocab=True,
                 tokenize=tokenizer.encode,
-                pad_token=pad_index)
+                pad_token=pad_index,
+                init_token=tokenizer.cls_token,
+                eos_token=tokenizer.sep_token)
 
 german = Field(sequential=True,
                use_vocab=True,
                tokenize=tokenizer.encode,
-               pad_token=pad_index,)
+               pad_token=pad_index,
+               init_token=tokenizer.cls_token,
+               eos_token=tokenizer.sep_token)
 
 fields = {'English': ('eng', english),
           'German': ('ger', german)}
