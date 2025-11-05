@@ -25,8 +25,8 @@ from training import Batch, LabelSmoothing, MyIterator, SimpleLossCompute, run_e
 from optimizer import ScheduledOptim, NoamOpt
 
 
-spacy_de = spacy.load('en_core_web_trf')
-spacy_en = spacy.load('de_dep_news_trf')
+spacy_de = spacy.load('de_dep_news_trf')
+spacy_en = spacy.load('en_core_web_trf')
 
 def tokenize_eng(text):
     return [tok.text for tok in spacy_en.tokenizer(text)]
@@ -130,7 +130,7 @@ class MultiGPULossCompute:
             l = nn.parallel.gather(loss,
                                    target_device=self.devices[0])
             l = l.sum()[0] / normalize
-            total += l.data[0]
+            total += l.item()
 
             # Backprop loss to output of transformer
             if self.opt is not None:
@@ -206,36 +206,60 @@ def main():
     opt.src_vocab_size = len(english.vocab)
     opt.trg_vocab_size = len(german.vocab)
 
+    # Setup device handling
+    if torch.cuda.is_available():
+        devices = list(range(torch.cuda.device_count()))
+        print(f'[Info] Using {len(devices)} GPU(s): {devices}')
+        primary_device = 0
+    else:
+        devices = None
+        primary_device = -1  # CPU
+        print('[Info] Using CPU')
 
-
-    devices = [0, 1, 2, 3]
     pad_idx = opt.trg_vocab_size
     model = make_model(len(english.vocab), len(german.vocab), N=6)
-    model.cuda()
+    model = model.to(device)
     criterion = LabelSmoothing(size=len(german.vocab), padding_idx=pad_idx, smoothing=0.1)
-    criterion.cuda()
+    criterion = criterion.to(device)
     BATCH_SIZE = 12000
-    train_iter = MyIterator(train_data, batch_size=BATCH_SIZE, device=0,
+    train_iter = MyIterator(train_data, batch_size=BATCH_SIZE, device=primary_device,
                             repeat=False, sort_key=lambda x: (len(x.eng), len(x.ger)),
                             batch_size_fn=batch_size_fn, train=True)
-    valid_iter = MyIterator(test_data, batch_size=BATCH_SIZE, device=0,
+    valid_iter = MyIterator(test_data, batch_size=BATCH_SIZE, device=primary_device,
                             repeat=False, sort_key=lambda x: (len(x.eng), len(x.ger)),
                             batch_size_fn=batch_size_fn, train=False)
-    model_par = nn.DataParallel(model, device_ids=devices)
+
+    # Use DataParallel only if multiple GPUs are available
+    if devices and len(devices) > 1:
+        model_par = nn.DataParallel(model, device_ids=devices)
+    else:
+        model_par = model
 
     model_opt = NoamOpt(model.src_embed[0].d_model, 1, 2000,
                         torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
     for epoch in range(10):
         model_par.train()
-        run_epoch((rebatch(pad_idx, b) for b in train_iter),
-                  model_par,
-                  MultiGPULossCompute(model.generator, criterion,
-                                      devices=devices, opt=model_opt))
+        if devices and len(devices) > 1:
+            # Use MultiGPU training
+            run_epoch((rebatch(pad_idx, b) for b in train_iter),
+                      model_par,
+                      MultiGPULossCompute(model.generator, criterion,
+                                          devices=devices, opt=model_opt))
+        else:
+            # Use single device training
+            run_epoch((rebatch(pad_idx, b) for b in train_iter),
+                      model_par,
+                      SimpleLossCompute(model.generator, criterion, opt=model_opt))
         model_par.eval()
-        loss = run_epoch((rebatch(pad_idx, b) for b in valid_iter),
-                         model_par,
-                         MultiGPULossCompute(model.generator, criterion,
-                                             devices=devices, opt=None))
+        if devices and len(devices) > 1:
+            loss = run_epoch((rebatch(pad_idx, b) for b in valid_iter),
+                             model_par,
+                             MultiGPULossCompute(model.generator, criterion,
+                                                 devices=devices, opt=None))
+        else:
+            loss = run_epoch((rebatch(pad_idx, b) for b in valid_iter),
+                             model_par,
+                             SimpleLossCompute(model.generator, criterion, opt=None))
         print(loss)
 
     for i, batch in enumerate(valid_iter):

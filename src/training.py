@@ -70,7 +70,7 @@ class LabelSmoothing(nn.Module):
 
     def __init__(self, size, padding_idx, smoothing=0.0):
         super(LabelSmoothing, self).__init__()
-        self.criterion = nn.KLDivLoss(size_average=False)
+        self.criterion = nn.KLDivLoss(reduction='sum')
         self.padding_idx = padding_idx
         self.confidence = 1.0 - smoothing
         self.smoothing = smoothing
@@ -106,7 +106,7 @@ class SimpleLossCompute:
         if self.opt is not None:
             self.opt.step()
             self.opt.optimizer.zero_grad()
-        return loss.data[0] * norm
+        return loss.item() * norm
 
 
 class MyIterator(data.BucketIterator):
@@ -145,7 +145,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
                                     .type_as(src.data)))
         prob = model.generator(out[:, -1])
         _, next_word = torch.max(prob, dim = 1)
-        next_word = next_word.data[0]
+        next_word = next_word.item()
         ys = torch.cat([ys,
                         torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
     return ys
